@@ -1,0 +1,207 @@
+<title>The Lazy Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#F4F6F8; --surface:#FFFFFF; --surface-sunk:#E9EDF1;
+  --ink:#12202E; --ink-soft:#3D4E5C; --ink-mute:#697A88;
+  --rule:#CFD8DF; --rule-soft:#E1E7EC;
+  --accent:#1E6F8C; --accent-soft:#DCEAF0;
+  --warn:#A87A16; --warn-soft:#F5EBD6;
+  --crit:#B3324A; --crit-soft:#F7DFE4;
+  --good:#2F6B4F; --good-soft:#DEEDE4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+    --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+    --rule:#2A3841; --rule-soft:#1E2A32;
+    --accent:#59AEC9; --accent-soft:#12303C;
+    --warn:#D6A94A; --warn-soft:#33280F;
+    --crit:#E2788B; --crit-soft:#3A1A22;
+    --good:#6FBE95; --good-soft:#12301F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+  --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+  --rule:#2A3841; --rule-soft:#1E2A32;
+  --accent:#59AEC9; --accent-soft:#12303C;
+  --warn:#D6A94A; --warn-soft:#33280F;
+  --crit:#E2788B; --crit-soft:#3A1A22;
+  --good:#6FBE95; --good-soft:#12301F;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:0 26px 100px}
+.mast{border-bottom:2px solid var(--ink);padding:60px 0 24px;margin-bottom:8px}
+.eyebrow{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 16px}
+h1{font-family:Archivo,sans-serif;font-weight:700;font-size:clamp(2rem,5.5vw,3.1rem);
+  line-height:1.03;letter-spacing:-.025em;margin:0 0 14px;text-wrap:balance}
+.standfirst{font-size:1.14rem;color:var(--ink-soft);margin:0}
+section{padding:40px 0 0}
+h2{font-family:Archivo,sans-serif;font-weight:700;font-size:1.5rem;letter-spacing:-.015em;
+  line-height:1.15;margin:0 0 10px;text-wrap:balance}
+h3{font-family:Archivo,sans-serif;font-weight:600;font-size:1.02rem;margin:24px 0 6px}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px;padding-left:20px}
+li{margin:0 0 6px}
+li::marker{color:var(--ink-mute)}
+strong{font-weight:600}
+code{font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--surface-sunk);
+  padding:1px 5px;border-radius:2px}
+hr{border:0;border-top:1px solid var(--rule);margin:44px 0 0}
+pre{overflow-x:auto;background:var(--surface-sunk);border:1px solid var(--rule);
+  padding:16px 18px;margin:16px 0 20px;font-size:12.8px;line-height:1.55}
+pre code{background:transparent;padding:0;font-size:inherit}
+.screen{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);
+  padding:20px 22px;margin:18px 0 22px}
+.screen pre{background:transparent;border:0;padding:0;margin:0;font-size:12.4px;line-height:1.7}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:15px 19px;margin:20px 0}
+.note.good{border-left-color:var(--good);background:var(--good-soft)}
+.note.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.note p:last-child{margin-bottom:0}
+.note .tag{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;display:block;margin-bottom:6px;color:var(--accent)}
+.note.good .tag{color:var(--good)}
+.note.warn .tag{color:var(--warn)}
+.scroll{overflow-x:auto;margin:18px 0 22px;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{text-align:left;padding:10px 14px;vertical-align:top;border-bottom:1px solid var(--rule-soft)}
+thead th{font-family:Archivo,sans-serif;font-weight:600;font-size:11px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-mute);background:var(--surface-sunk);
+  border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Simplified plan</p>
+  <h1>The Lazy Scheduler</h1>
+  <p class="standfirst">Same problem, roughly a fifth of the machinery. Show the data, recommend the obvious number, and make being wrong cost a wait instead of bad numbers.</p>
+</header>
+
+<section>
+  <h2>What went wrong with v3</h2>
+  <p>Almost every complicated part existed to make a judgment <strong>automatically</strong> that a human makes <strong>instantly by looking</strong>.</p>
+  <p>A classifier deciding whether a table is weekly. A slot model deciding which of three daily refreshes counts. Changepoint detection noticing a schedule moved. Every one of those is a machine straining to reach a conclusion that is obvious the moment you put the last 30 days on screen.</p>
+  <p>So: stop deciding for the user. Show them the thirty days and let them see it.</p>
+</section>
+
+<hr>
+
+<section>
+  <h2>The whole product, on one screen</h2>
+  <p>This is the deliverable. If a junior engineer can read this at 3am and act, we're done.</p>
+  <div class="screen">
+<pre><code>VIEW   sales_gold.customer_360
+       8 dependencies · 30 days history · times IST
+
+       START AT 05:45   safe — later than all 30 days
+       or       05:20   tighter — would have been early on 1 day in 30
+
+DEPENDENCY            REFRESHES   USUAL   WORST   MISSED
+bronze.orders         daily       04:12   05:30   0
+bronze.customers      daily       03:50   04:05   0
+bronze.payments       daily       04:40   05:28   0
+silver.fx_rates       daily       02:15   02:40   2
+silver.products       Mondays     06:20   06:45   0
+silver.geo            daily       03:05   03:22   0
+gold.segments         daily       05:01   05:31   0
+gold.ltv              daily       04:55   05:12   0
+
+!  silver.products refreshes Mondays only → use 07:00 on Mondays
+!  silver.fx_rates missed 2 of 30 days — no schedule time fixes that
+!  1 table skipped: ext.crm_sync is not Delta, can't read its history</code></pre>
+  </div>
+  <p>No confidence tiers, no coverage percentages, no vocabulary anyone has to learn. <strong>"Worst day in 30"</strong> and <strong>"worst but one"</strong> are the same two order statistics from v3 — just said in words a person already knows.</p>
+  <p>The weekly table isn't a classifier output buried in a report. It's a row saying <code>Mondays</code>, which anyone reads in half a second.</p>
+</section>
+
+<hr>
+
+<section>
+  <h2>The gate — 15 lines that replace most of the spec</h2>
+  <p>Drop this at the top of the materialization job. It checks instead of predicting.</p>
+  <pre><code>def wait_for_deps(tables, timeout_min=90):
+    deadline = time.time() + timeout_min * 60
+    while True:
+        late = [t for t in tables if not refreshed_today(t)]
+        if not late:
+            return True
+        if time.time() > deadline:
+            alert(f"skipping: {late} not refreshed")
+            return False
+        time.sleep(300)
+
+def refreshed_today(t):
+    row = spark.sql(f"DESCRIBE HISTORY {t} LIMIT 1").first()
+    return row.timestamp.date() == date.today() and wrote_rows(row)</code></pre>
+  <div class="note good">
+    <span class="tag">Why this is the real fix</span>
+    <p>With the gate, a wrong recommendation costs five minutes of waiting. Without it, a wrong recommendation silently publishes yesterday's numbers to a report. That difference is why the gate is worth more than every statistical refinement in v3 combined — and it's shorter than any one of them.</p>
+  </div>
+  <p>It also deletes the nastiest bug we found: late runs bleeding into the next day and dragging the recommendation <em>earlier</em>. The gate doesn't care what day a commit was attributed to. It asks whether the table refreshed, now.</p>
+</section>
+
+<hr>
+
+<section>
+  <h2>What you build</h2>
+  <ol>
+    <li><strong>Walk the dependencies.</strong> Recurse <code>view_dependencies</code> from the UC Tables API. Views pass through, tables are what matter. Unchanged from v3 — this part was never the problem.</li>
+    <li><strong>Pull each table's history.</strong> <code>DESCRIBE HISTORY</code>, keep commits that wrote rows. Read the operation class from <code>operationParameters.mode</code>, not the operation name — plain <code>WRITE</code> is the most common one and its mode is what tells you whether it's a real refresh.</li>
+    <li><strong>Per table, per day: when did it finish?</strong> First qualifying commit of each day. Collect: usual (median), worst (max), days missed, and which weekdays it runs.</li>
+    <li><strong>Recommend.</strong> Worst all-clear across dependencies, plus a buffer. Print the table above.</li>
+  </ol>
+  <p>Four steps. Three config values: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST).</p>
+</section>
+
+<hr>
+
+<section>
+  <h2>What got deleted, and when to add it back</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Deleted</th><th>Replaced by</th><th>Add back when</th></tr></thead>
+      <tbody>
+        <tr><td class="cut">8-class cadence classifier</td><td>A "refreshes" column showing observed days</td><td>Never — a human reads this faster than a classifier decides it</td></tr>
+        <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>A table refreshes many times daily and you need a later slot</td></tr>
+        <tr><td class="cut">Cycle attribution + cutover detection</td><td>Calendar day</td><td>A pipeline genuinely straddles midnight — then set the day boundary by hand</td></tr>
+        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "worst but one"</td><td>You have 100+ days of history, which you won't for a year</td></tr>
+        <tr><td class="cut">Changepoint detection</td><td>The 30 days are on screen</td><td>You automate the check and no human reads the output</td></tr>
+        <tr><td class="cut">Tolerance bands, outlier rules</td><td>The gate</td><td>Never, once the gate exists</td></tr>
+        <tr><td class="cut">Timing/reliability split</td><td>A "missed" column</td><td>Never</td></tr>
+        <tr><td class="cut">18-item blind spot register</td><td>Only what applies, usually 0–3 lines</td><td>Never — the other 15 were noise on any given run</td></tr>
+        <tr><td class="cut">10 of 13 parameters</td><td>3</td><td>Someone asks for one</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn">
+    <span class="tag">The one thing to keep from v3</span>
+    <p>Print blind-spot warnings <strong>only when they apply to the view in front of you</strong>. A foreign table, a permission failure, a function dependency — those get a line each. If none apply, print nothing. The register was right; showing all 18 every run was what made it unreadable.</p>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Honest limits</h2>
+  <p>Two you should say out loud when handing this over, because they're properties of the approach and not bugs to fix later.</p>
+  <ul>
+    <li><strong>It proves pipelines finished, not that data is correct.</strong> Late-arriving records aren't visible in commit history to anyone, by any method.</li>
+    <li><strong>30 days is 30 days.</strong> "Worst of 30" is a real, useful number, but it is not a guarantee about day 31. The gate is what covers day 31.</li>
+  </ul>
+  <p>The detailed v3 spec stays useful as an appendix — it holds eight rounds of edge cases worth consulting when something behaves oddly. Just don't build from it.</p>
+</section>
+
+</div>

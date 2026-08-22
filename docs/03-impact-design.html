@@ -1,0 +1,266 @@
+<title>Who Uses This</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#F4F6F8; --surface:#FFFFFF; --surface-sunk:#E9EDF1;
+  --ink:#12202E; --ink-soft:#3D4E5C; --ink-mute:#697A88;
+  --rule:#CFD8DF; --rule-soft:#E1E7EC;
+  --accent:#1E6F8C; --accent-soft:#DCEAF0;
+  --warn:#A87A16; --warn-soft:#F5EBD6;
+  --crit:#B3324A; --crit-soft:#F7DFE4;
+  --good:#2F6B4F; --good-soft:#DEEDE4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+    --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+    --rule:#2A3841; --rule-soft:#1E2A32;
+    --accent:#59AEC9; --accent-soft:#12303C;
+    --warn:#D6A94A; --warn-soft:#33280F;
+    --crit:#E2788B; --crit-soft:#3A1A22;
+    --good:#6FBE95; --good-soft:#12301F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+  --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+  --rule:#2A3841; --rule-soft:#1E2A32;
+  --accent:#59AEC9; --accent-soft:#12303C;
+  --warn:#D6A94A; --warn-soft:#33280F;
+  --crit:#E2788B; --crit-soft:#3A1A22;
+  --good:#6FBE95; --good-soft:#12301F;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:0 26px 100px}
+.mast{border-bottom:2px solid var(--ink);padding:60px 0 24px}
+.eyebrow{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 16px}
+h1{font-family:Archivo,sans-serif;font-weight:700;font-size:clamp(2rem,5.5vw,3.1rem);
+  line-height:1.03;letter-spacing:-.025em;margin:0 0 14px;text-wrap:balance}
+.standfirst{font-size:1.13rem;color:var(--ink-soft);margin:0;max-width:62ch}
+section{padding:42px 0 0}
+h2{font-family:Archivo,sans-serif;font-weight:700;font-size:1.48rem;letter-spacing:-.015em;
+  line-height:1.15;margin:0 0 10px;text-wrap:balance;display:flex;gap:12px;align-items:baseline}
+h2 .num{font-family:"JetBrains Mono",monospace;font-size:.68rem;font-weight:400;
+  color:var(--accent);letter-spacing:.08em;flex:none;padding-top:2px}
+h3{font-family:Archivo,sans-serif;font-weight:600;font-size:1.02rem;margin:24px 0 6px}
+p{margin:0 0 14px;max-width:68ch}
+ul,ol{margin:0 0 14px;padding-left:20px;max-width:68ch}
+li{margin:0 0 6px}
+li::marker{color:var(--ink-mute)}
+strong{font-weight:600}
+code{font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--surface-sunk);
+  padding:1px 5px;border-radius:2px;word-break:break-word}
+hr{border:0;border-top:1px solid var(--rule);margin:46px 0 0}
+pre{overflow-x:auto;background:var(--surface-sunk);border:1px solid var(--rule);
+  padding:16px 18px;margin:16px 0 20px;font-size:12.7px;line-height:1.56}
+pre code{background:transparent;padding:0;font-size:inherit}
+.screen{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);
+  padding:20px 22px;margin:18px 0 22px}
+.screen pre{background:transparent;border:0;padding:0;margin:0;font-size:12.3px;line-height:1.7}
+figure{margin:22px 0 26px}
+.figbox{overflow-x:auto;border:1px solid var(--rule);background:var(--surface);padding:24px 20px}
+figcaption{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ink-mute);
+  margin-top:11px;line-height:1.5;max-width:68ch}
+svg{display:block;max-width:100%;height:auto;margin:0 auto;color:var(--ink)}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:15px 19px;
+  margin:20px 0;max-width:68ch}
+.note.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.note.crit{border-left-color:var(--crit);background:var(--crit-soft)}
+.note p:last-child{margin-bottom:0}
+.note .tag{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;display:block;margin-bottom:6px;color:var(--accent)}
+.note.warn .tag{color:var(--warn)}
+.note.crit .tag{color:var(--crit)}
+.scroll{overflow-x:auto;margin:18px 0 22px;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{text-align:left;padding:10px 14px;vertical-align:top;border-bottom:1px solid var(--rule-soft)}
+thead th{font-family:Archivo,sans-serif;font-weight:600;font-size:11px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-mute);background:var(--surface-sunk);
+  border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td code{background:transparent;padding:0;font-size:.83em}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Design spec — impact analysis</p>
+  <h1>Who Uses This</h1>
+  <p class="standfirst">Given a table or view, what breaks if you change it. A separate tool from the scheduler, for a reason worth understanding before you build either.</p>
+</header>
+
+<section>
+  <h2><span class="num">00</span>Why it's separate</h2>
+  <p>The obvious assumption is that impact analysis is the scheduler's dependency walk run backwards. It isn't, and the difference decides the architecture.</p>
+  <p><strong><code>view_dependencies</code> has no reverse index.</strong> The UC Tables API answers "what does this view read" for one object. Nothing answers "what reads this table" — to get that from declared metadata you would have to fetch every view in the metastore and invert the result. That is a full-catalog crawl to answer one question.</p>
+  <p>So impact analysis uses a different source entirely: <strong><code>system.access.table_lineage</code></strong>, which is observed rather than declared, and queryable in both directions with plain SQL.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 780 330" role="img" aria-label="Side by side comparison: the scheduler walks declared metadata downward through the REST API, while impact analysis walks observed lineage upward through SQL; no shared traversal connects them">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="Archivo, sans-serif" font-size="12" fill="currentColor">
+
+          <!-- LEFT: scheduler -->
+          <text x="30" y="26" font-size="11" font-weight="600" fill="#1E6F8C">SCHEDULER</text>
+          <text x="30" y="42" font-size="10" opacity="0.7">declared · REST · one object per call</text>
+
+          <rect x="90" y="66" width="150" height="34" fill="none" stroke="#1E6F8C" stroke-width="1.7"/>
+          <text x="165" y="88" text-anchor="middle" font-size="11.5">your view</text>
+
+          <line x1="165" y1="100" x2="165" y2="132" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"/>
+          <text x="175" y="120" font-size="10" opacity="0.75">reads</text>
+
+          <rect x="30" y="134" width="120" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="90" y="155" text-anchor="middle" font-size="11">table A</text>
+          <rect x="180" y="134" width="120" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="240" y="155" text-anchor="middle" font-size="11">view B</text>
+
+          <line x1="240" y1="166" x2="240" y2="196" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"/>
+          <rect x="180" y="198" width="120" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="240" y="219" text-anchor="middle" font-size="11">table C</text>
+
+          <text x="30" y="262" font-size="10.5" opacity="0.8">answers: when is my view safe to build</text>
+
+          <!-- divider -->
+          <line x1="390" y1="18" x2="390" y2="300" stroke="currentColor" stroke-width="1" stroke-dasharray="4 5" opacity="0.45"/>
+          <text x="390" y="316" text-anchor="middle" font-size="10.5" fill="#B3324A">no shared traversal — opposite direction, different source</text>
+
+          <!-- RIGHT: impact -->
+          <text x="440" y="26" font-size="11" font-weight="600" fill="#1E6F8C">IMPACT</text>
+          <text x="440" y="42" font-size="10" opacity="0.7">observed · SQL · whole graph per query</text>
+
+          <rect x="500" y="198" width="150" height="34" fill="none" stroke="#1E6F8C" stroke-width="1.7"/>
+          <text x="575" y="220" text-anchor="middle" font-size="11.5">your table</text>
+
+          <line x1="575" y1="198" x2="575" y2="168" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"/>
+          <text x="585" y="186" font-size="10" opacity="0.75">read by</text>
+
+          <rect x="440" y="134" width="120" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="500" y="155" text-anchor="middle" font-size="11">view X</text>
+          <rect x="590" y="134" width="140" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="660" y="155" text-anchor="middle" font-size="11">job Y</text>
+
+          <line x1="500" y1="134" x2="500" y2="104" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"/>
+          <rect x="430" y="70" width="150" height="32" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="505" y="91" text-anchor="middle" font-size="11">dashboard Z</text>
+
+          <text x="440" y="262" font-size="10.5" opacity="0.8">answers: what breaks if I change it</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The scheduler descends from one view to the tables beneath it; impact climbs from one table to everything above it. Only the right-hand side reaches non-table consumers — dashboards, jobs, queries — because only observed lineage records them.</figcaption>
+  </figure>
+
+  <p>That last point is a genuine gain, not a consolation. Declared metadata knows about views and tables. Observed lineage also captures <strong>dashboards, DBSQL queries, notebooks, jobs and pipelines</strong> — which is where the business impact of a change actually lands.</p>
+</section>
+
+<hr>
+
+<section>
+  <h2><span class="num">01</span>The whole tool</h2>
+  <p>One SQL query, one recursion, one report. Considerably smaller than the scheduler.</p>
+  <div class="screen">
+<pre><code>TABLE  bronze.orders
+       17 consumers · lineage window 90 days
+
+DIRECT (5)
+  silver.orders_clean          TABLE       last read  2h ago
+  silver.returns               TABLE       last read  2h ago
+  gold.revenue_daily           TABLE       last read  6h ago
+  "Ops Monitor"                DASHBOARD   last read  1h ago
+  refresh_finance_marts        JOB         last read  6h ago
+
+INDIRECT (12)
+  gold.customer_360            TABLE       2 hops
+  gold.ltv                     TABLE       2 hops
+  "Exec Revenue"               DASHBOARD   3 hops     last read yesterday
+  "Board Pack Q3"              DASHBOARD   4 hops     last read 12 days ago
+  ... 8 more
+
+!  3 consumers last read this &gt;30 days ago — may be abandoned
+!  lineage only records what actually ran. Anything idle longer than
+   the window is invisible to this report.</code></pre>
+  </div>
+  <p>Hops matter more than raw count. A dashboard three hops away still breaks; a table nobody has read in two months probably doesn't need a migration plan. Both facts are on screen without anyone computing a score.</p>
+</section>
+
+<hr>
+
+<section>
+  <h2><span class="num">02</span>The query</h2>
+  <p>Recursive CTE, available on DBR 17.0+ and DBSQL 2025.25+. The depth cap and the <code>seen</code> guard are not optional — job-level cycles exist even though view-level ones cannot.</p>
+  <pre><code>WITH RECURSIVE edges AS (
+  SELECT DISTINCT
+      source_table_full_name AS src,
+      target_table_full_name AS tgt,
+      entity_type,
+      MAX(event_time) AS last_seen
+  FROM system.access.table_lineage
+  WHERE event_date &gt;= current_date() - INTERVAL 90 DAYS
+    AND source_table_full_name IS NOT NULL
+  GROUP BY 1,2,3
+),
+up AS (
+  SELECT tgt AS node, entity_type, 1 AS hops, last_seen
+  FROM edges WHERE src = :target
+
+  UNION ALL
+
+  SELECT e.tgt, e.entity_type, up.hops + 1, e.last_seen
+  FROM edges e
+  JOIN up ON e.src = up.node
+  WHERE up.hops &lt; 6
+)
+SELECT node, entity_type, MIN(hops) AS hops, MAX(last_seen) AS last_seen
+FROM up GROUP BY node, entity_type
+ORDER BY hops, last_seen DESC</code></pre>
+  <div class="note warn">
+    <span class="tag">Two things that will bite</span>
+    <p><strong>Partition filter first.</strong> <code>system.access.table_lineage</code> is partitioned on <code>event_date</code>. Without that predicate the query scans a year of account-wide lineage.</p>
+    <p><strong>Cap the depth.</strong> Six hops is already more than anyone acts on, and a wide graph without a cap will run away. If your workspace predates recursive CTE support, run the same thing as a Python loop — six iterations of a simple join, same result.</p>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <h2><span class="num">03</span>Two honest limits</h2>
+  <p><strong>It only sees what ran.</strong> Lineage is emitted when a workload executes. A quarterly report that hasn't run since June will not appear, and you will not be told it's missing. This is the mirror image of the scheduler's constraint — there, declared metadata was the right source precisely <em>because</em> a new view has never run.</p>
+  <p><strong>It stops at the catalog boundary.</strong> Tableau, Power BI, Excel extracts and reverse-ETL syncs are invisible to Unity Catalog. If those matter, keep a small hand-maintained list of external consumers per critical table. Twenty lines of YAML beats a dashboard that quietly under-reports the thing people care about most.</p>
+  <div class="note">
+    <span class="tag">The free supplement</span>
+    <p>If the scheduler caches the dependency graphs it walks, invert that cache and union it in. It covers exactly the gap above — declared dependencies that haven't run yet — for no extra cost, since the scheduler computed them anyway. Add it once the scheduler is in use, not before.</p>
+  </div>
+</section>
+
+<hr>
+
+<section>
+  <h2><span class="num">04</span>Config and build order</h2>
+  <p>Two parameters: <code>window_days</code> (90) and <code>max_hops</code> (6).</p>
+  <ol>
+    <li>Run the query by hand against a table you already understand. Check the direct consumers match what you know before trusting anything transitive.</li>
+    <li>Wrap it, add the hop grouping and the stale-consumer warning.</li>
+    <li>Stop. Column-level impact, blast-radius scoring and owner lookup are all real features and none of them are needed to answer the question in the title.</li>
+  </ol>
+  <div class="note">
+    <span class="tag">Shared with the scheduler</span>
+    <p>A config module and output formatting. That's the honest extent of it — worth a small common package, not worth merging the tools.</p>
+  </div>
+</section>
+
+</div>
