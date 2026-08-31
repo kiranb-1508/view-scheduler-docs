@@ -96,3 +96,58 @@ def parse_json_field(value: Any) -> dict | None:
     except (TypeError, ValueError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+# --- history readers ---------------------------------------------------------
+
+def _parse_ts(value: str):
+    from datetime import datetime, timezone
+    text = (value or "").replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(text)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def read_history(ws: "Workspace", table: str) -> list:
+    """DESCRIBE HISTORY for a physical Delta table."""
+    from .models import Commit
+    rows = ws.sql(f"DESCRIBE HISTORY {table}", target=table)
+    return [
+        Commit(
+            version=int(r.get("version") or 0),
+            timestamp=_parse_ts(r["timestamp"]),
+            operation=r.get("operation") or "",
+            params=parse_json_field(r.get("operationParameters")) or {},
+            metrics=parse_json_field(r.get("operationMetrics")),
+        )
+        for r in rows
+    ]
+
+
+def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
+    """Completed refreshes of a materialized view.
+
+    DESCRIBE HISTORY is rejected on a materialized view
+    (EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE), so refresh times come from the
+    pipeline event log instead. Two consequences worth knowing:
+
+      * The event log is per-pipeline, so update_progress/COMPLETED is the
+        pipeline finishing, not this table specifically. It is a conservative
+        proxy — never earlier than the table was ready.
+      * By default only the pipeline's run-as user can read it. A caller
+        without that access gets a permission error, which the caller turns
+        into a skipped entry rather than a crash.
+    """
+    from .models import Commit
+    statement = (
+        "SELECT timestamp, "
+        "get_json_object(details, '$.update_progress.state') AS state "
+        f"FROM event_log(TABLE({mv})) "
+        "WHERE event_type = 'update_progress' "
+        "AND get_json_object(details, '$.update_progress.state') = 'COMPLETED'"
+    )
+    rows = ws.sql(statement, target=mv)
+    return [
+        Commit(version=i, timestamp=_parse_ts(r["timestamp"]),
+               operation="MV REFRESH", params={}, metrics=None)
+        for i, r in enumerate(rows)
+    ]
