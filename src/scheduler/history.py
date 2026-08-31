@@ -131,23 +131,10 @@ def finish_times(commits: Iterable[Commit], today: date, days: int,
     return by_day
 
 
-def observed_window_days(commits: Iterable[Commit], today: date, tz) -> int:
-    """The table's real history window, from its oldest entry.
-
-    Retention is delta.logRetentionDuration, default 30 days but not
-    guaranteed, and VACUUM does not truncate DESCRIBE HISTORY. Never assume.
-    """
-    stamps = [c.timestamp.astimezone(tz).date() for c in commits]
-    if not stamps:
-        return 0
-    return (today - min(stamps)).days
-
-
 def summarize(name: str, commits: list[Commit], today: date, days: int,
               tz) -> TableHistory:
     return TableHistory(
         name=name,
         finish_times=finish_times(commits, today, days, tz),
-        window_days=observed_window_days(commits, today, tz),
         metrics_degraded=is_degraded(commits),
     )

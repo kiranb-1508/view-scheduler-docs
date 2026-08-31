@@ -9,9 +9,7 @@ from datetime import date, timedelta
 
 import pytest
 
-sys.path.insert(0, "rig")
-
-import plan  # noqa: E402
+import plan
 
 
 def test_window_is_exactly_thirty_days():

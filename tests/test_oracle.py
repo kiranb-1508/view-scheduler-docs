@@ -6,18 +6,15 @@ the analyzer disagrees with the oracle here, it will disagree there too — and
 finding that out now is worth thirty days.
 """
 
-import sys
 from datetime import datetime, time
 
 import pytest
 
-sys.path.insert(0, "rig")
-
-import oracle  # noqa: E402
-import plan  # noqa: E402
-from scheduler.models import TableHistory  # noqa: E402
-from scheduler.recommend import recommend  # noqa: E402
-from scheduler.report import render  # noqa: E402
+import oracle
+import plan
+from scheduler.models import TableHistory
+from scheduler.recommend import recommend
+from scheduler.report import render
 
 TODAY = plan.RIG_END
 BUFFER = 15
@@ -31,7 +28,6 @@ def history_from_plan(table: str) -> TableHistory:
         finish_times={day: datetime.combine(day, oracle.slot_time(slot),
                                             tzinfo=oracle.TZ)
                       for day, slot in finishes.items()},
-        window_days=30,
         metrics_degraded=False,
     )
 
@@ -141,7 +137,7 @@ def test_healthy_view_prints_no_warnings_at_all():
 def test_broken_view_refuses_to_invent_a_time():
     tables = plan.VIEWS["v_broken"]
     histories = [history_from_plan(t) for t in tables if t in plan.DRIVEN_TABLES]
-    histories.append(TableHistory("t_dormant", {}, 30, False))
+    histories.append(TableHistory("t_dormant", {}, False))
     result = recommend(histories, BUFFER)
     text = render("v_broken", result, [], "Asia/Kolkata")
     assert result.safe is None

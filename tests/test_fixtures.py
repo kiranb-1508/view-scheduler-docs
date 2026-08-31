@@ -28,9 +28,3 @@ def test_absent_metrics_is_none_not_empty_dict():
     ctas = next(r for r in f.OPERATION_ZOO if r["operation"] == "CREATE OR REPLACE TABLE")
     assert update["operationMetrics"] is None
     assert json.loads(ctas["operationMetrics"]) == {}
-
-
-def test_daily_history_one_commit_per_day():
-    rows = f.daily_history([("2026-08-01", "04:00"), ("2026-08-02", "04:10")])
-    assert len(rows) == 2
-    assert {r["timestamp"][:10] for r in rows} == {"2026-08-01", "2026-08-02"}

@@ -112,16 +112,6 @@ OPERATION_ZOO: list[dict[str, Any]] = [
 ]
 
 
-def daily_history(table_seed: list[tuple[str, str]], operation: str = "WRITE",
-                  mode: str = "Overwrite") -> list[dict[str, Any]]:
-    """Build a history from [(day, hh:mm), ...] — one qualifying commit each."""
-    return [
-        raw_history_row(i, at(day, hhmm), operation, {"mode": mode},
-                        {"numOutputRows": "100"})
-        for i, (day, hhmm) in enumerate(reversed(table_seed))
-    ]
-
-
 # --- Materialized view event log --------------------------------------------
 
 def mv_event_rows(completions: list[datetime], noise: bool = True) -> list[dict[str, Any]]:

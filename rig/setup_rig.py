@@ -74,9 +74,7 @@ def statements() -> list[tuple[str, str]]:
     return out
 
 
-def guard(statement: str) -> None:
-    if S not in statement and "rig_probe" not in statement:
-        raise SystemExit(f"refusing statement outside {S}:\n  {statement}")
+guard = plan.guard
 
 
 def main() -> None:
@@ -84,7 +82,7 @@ def main() -> None:
     ws = Workspace(warehouse_id=os.environ["WAREHOUSE_ID"])
     print(f"setting up {S}  ({plan.RIG_START} → {plan.RIG_END})\n")
     for label, statement in statements():
-        guard(statement)
+        guard(statement, allow=("rig_probe",))
         try:
             ws.sql(statement, target=label)
             print(f"  ok    {label}")

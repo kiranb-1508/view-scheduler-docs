@@ -12,7 +12,7 @@ DAYS = [date(2026, 8, d) for d in range(1, 11)]
 
 def history(name, hhmm="04:00", days=DAYS, degraded=False):
     return TableHistory(name, {d: f.at(d.isoformat(), hhmm) for d in days},
-                        30, degraded)
+                        degraded)
 
 
 def test_clean_run_prints_no_warning_section():
@@ -45,8 +45,8 @@ def test_degraded_table_gets_a_line():
 
 
 def test_no_overlapping_days_says_so_instead_of_inventing_a_time():
-    a = TableHistory("c.s.a", {DAYS[0]: f.at(DAYS[0].isoformat(), "04:00")}, 30, False)
-    b = TableHistory("c.s.b", {DAYS[5]: f.at(DAYS[5].isoformat(), "04:00")}, 30, False)
+    a = TableHistory("c.s.a", {DAYS[0]: f.at(DAYS[0].isoformat(), "04:00")}, False)
+    b = TableHistory("c.s.b", {DAYS[5]: f.at(DAYS[5].isoformat(), "04:00")}, False)
     text = render("c.s.v", recommend([a, b], 15), [], "Asia/Kolkata")
     assert "NO RECOMMENDATION" in text
     assert "START AT" not in text

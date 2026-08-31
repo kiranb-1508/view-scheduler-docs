@@ -10,12 +10,9 @@ dependency (CI installs only databricks-sdk and pytest).
 """
 
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, "rig")
-
-import plan  # noqa: E402
+import plan
 
 BUNDLE = Path(__file__).resolve().parent.parent / "rig" / "databricks.yml"
 

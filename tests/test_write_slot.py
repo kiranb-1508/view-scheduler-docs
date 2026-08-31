@@ -1,15 +1,12 @@
 """The writer emits the right SQL and refuses to leave its schema."""
 
-import sys
 from datetime import datetime, timedelta
 from unittest import mock
 
 import pytest
 
-sys.path.insert(0, "rig")
-
-import plan  # noqa: E402
-import write_slot  # noqa: E402
+import plan
+import write_slot
 
 DAY = plan.RIG_START
 

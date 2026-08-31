@@ -9,7 +9,7 @@ from datetime import date, datetime
 from typing import Sequence
 
 from . import obs
-from .client import Workspace, read_history, read_mv_refreshes
+from .client import Workspace, failure_category, read_history, read_mv_refreshes
 from .config import Config
 from .history import summarize
 from .models import Skipped, TableHistory
@@ -50,10 +50,9 @@ def _read(ws: Workspace, table: str) -> Sequence:
 
 
 def _reason(exc: Exception) -> str:
-    text = str(exc)
-    lowered = text.lower()
-    if "permission" in lowered or "does not have" in lowered:
+    category = failure_category(exc)
+    if category == "permission":
         return "permission denied — cannot read its history"
-    if "expect_table_not_view" in lowered:
+    if category == "mv_no_history":
         return "materialized view whose pipeline event log is not readable"
-    return f"history unreadable: {text[:100]}"
+    return f"history unreadable: {str(exc)[:100]}"

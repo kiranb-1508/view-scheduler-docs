@@ -61,6 +61,23 @@ class Workspace:
             return [dict(zip(columns, row)) for row in data]
 
 
+def failure_category(exc: Exception) -> str:
+    """Coarse cause of an SDK / SQL failure, for turning into a human reason.
+
+    One place decides how a permission error or a missing object is recognised,
+    so the walker and the history reader classify the same way even though they
+    word their messages differently.
+    """
+    text = str(exc).lower()
+    if "permission" in text or "does not have" in text or "403" in text:
+        return "permission"
+    if "does not exist" in text or "not found" in text or "404" in text:
+        return "not_found"
+    if "expect_table_not_view" in text:
+        return "mv_no_history"
+    return "other"
+
+
 def parse_json_field(value: Any) -> dict | None:
     """operationParameters/operationMetrics arrive as JSON strings over the SQL
     API and as maps over Spark. None means the field was absent entirely."""

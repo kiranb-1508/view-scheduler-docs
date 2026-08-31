@@ -42,5 +42,4 @@ class TableHistory:
 
     name: str
     finish_times: dict = field(default_factory=dict)   # date -> aware datetime
-    window_days: int = 0          # real retention, derived from the oldest entry
     metrics_degraded: bool = False

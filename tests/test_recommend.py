@@ -20,7 +20,7 @@ def history(name, times, degraded=False):
         day: f.at(day.isoformat(), hhmm)
         for day, hhmm in zip(DAYS, times) if hhmm is not None
     }
-    return TableHistory(name=name, finish_times=finish, window_days=5,
+    return TableHistory(name=name, finish_times=finish,
                         metrics_degraded=degraded)
 
 
@@ -61,11 +61,11 @@ def test_missed_days_are_reported_not_silently_absorbed():
     """
     span = [date(2026, 8, 1) + timedelta(days=i) for i in range(30)]
     daily = TableHistory("orders", {d: f.at(d.isoformat(), "04:00") for d in span},
-                         30, False)
+                         False)
     skipped_two = [d for i, d in enumerate(span) if i not in (7, 19)]
     patchy = TableHistory("fx_rates",
                           {d: f.at(d.isoformat(), "02:15") for d in skipped_two},
-                          30, False)
+                          False)
     result = recommend([daily, patchy], buffer_min=15)
     row = next(r for r in result.rows if r.name == "fx_rates")
     assert row.refreshes == "daily"

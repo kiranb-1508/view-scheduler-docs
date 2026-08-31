@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
+from .client import failure_category
 from .models import Skipped
 
 #: Types that stop the walk — something with a real commit history behind it.
@@ -88,10 +89,9 @@ def walk(fqn: str, fetch: Fetch, max_depth: int = MAX_DEPTH) -> tuple[list[str],
 
 
 def _reason(exc: Exception) -> str:
-    text = f"{exc}"
-    lowered = text.lower()
-    if "permission" in lowered or "does not have" in lowered or "403" in lowered:
+    category = failure_category(exc)
+    if category == "permission":
         return "permission denied"
-    if "does not exist" in lowered or "not found" in lowered or "404" in lowered:
+    if category == "not_found":
         return "not found"
-    return f"{type(exc).__name__}: {text[:120]}"
+    return f"{type(exc).__name__}: {str(exc)[:120]}"

@@ -8,8 +8,7 @@ import pytest
 
 from scheduler.client import parse_json_field
 from scheduler.history import (
-    classify, finish_times, is_degraded, observed_window_days, qualifying,
-    rows_written, summarize,
+    classify, finish_times, is_degraded, qualifying, rows_written, summarize,
 )
 from scheduler.models import Commit
 from tests import fixtures as f
@@ -133,11 +132,6 @@ def test_days_are_local_days_not_utc_days():
 def test_commits_outside_the_window_are_excluded():
     old = commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-06-01", "04:00"))
     assert finish_times([old], date(2026, 8, 6), 30, UTC) == {}
-
-
-def test_observed_window_is_derived_not_assumed():
-    commits = [commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-01", "04:00"))]
-    assert observed_window_days(commits, date(2026, 8, 6), UTC) == 5
 
 
 def test_summarize_carries_the_degraded_flag():

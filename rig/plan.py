@@ -38,6 +38,19 @@ SLOT_TOLERANCE_MIN = 25
 OVERWRITE, APPEND, MERGE, TOUCH = "overwrite", "append", "merge", "touch"
 
 
+def guard(statement: str, allow: tuple[str, ...] = ()) -> None:
+    """Refuse any statement that does not stay inside the rig schema.
+
+    The single enforcement point both the setup DDL and the slot writer call:
+    the rig only ever writes to SCHEMA. `allow` names extra scratch objects the
+    caller may legitimately touch (setup drops a leftover capability-probe
+    schema).
+    """
+    if SCHEMA in statement or any(token in statement for token in allow):
+        return
+    raise SystemExit(f"refusing statement outside {SCHEMA}:\n  {statement}")
+
+
 @dataclass(frozen=True)
 class Write:
     """One statement the rig will issue."""
@@ -67,28 +80,24 @@ def is_active(day: date) -> bool:
     return RIG_START <= day <= RIG_END
 
 
-def die(table: str, day: date, salt: str = "", n: int = 100) -> int:
-    """A stable pseudo-random integer in [0, n) for this table and day."""
-    key = f"{table}|{day.isoformat()}|{salt}".encode()
+def die(table: str, day: date, n: int = 100) -> int:
+    """A stable pseudo-random integer in [0, n) for this table and day.
+
+    Used for the per-day zero-row decision, which genuinely needs to vary
+    across the window. The two outlier sets below are fixed, so they are just
+    literal day offsets rather than a ranked hash.
+    """
+    key = f"{table}|{day.isoformat()}".encode()
     return int(hashlib.md5(key).hexdigest()[:8], 16) % n
 
 
-def _pick(table: str, salt: str, window: list[date], count: int) -> set[date]:
-    """The `count` lowest-ranked days within `window` — exactly that many,
-    chosen deterministically, rather than a probability that might give three
-    or one."""
-    ranked = sorted(window, key=lambda d: (die(table, d, salt, 10 ** 6), d))
-    return set(ranked[:count])
-
-
-#: Deliberately spread across the window rather than left to the hash. Ranked
-#: purely by hash, both late days and all three skips landed in the final week,
-#: which would leave the early checkpoints with nothing to detect.
-LATE_DAYS = (_pick("t_daily_late_tail", "late", days()[2:9], 1)
-             | _pick("t_daily_late_tail", "late", days()[9:], 1))
-
-FLAKY_SKIPS = (_pick("t_flaky", "skip", days()[1:8], 1)
-               | _pick("t_flaky", "skip", days()[8:], 2))
+#: Spread across the window on purpose so each checkpoint sees signal: one late
+#: day and one skip land before day 8, the rest later. These are offsets from
+#: RIG_START — 2026-09-08 / -24 late, 2026-09-05 / -16 / -25 skipped — and the
+#: scheduled checkpoint prompts name those exact dates, so do not move them
+#: without updating those.
+LATE_DAYS = {days()[7], days()[23]}
+FLAKY_SKIPS = {days()[4], days()[15], days()[24]}
 
 
 def writes_for(slot: str, day: date) -> list[Write]:

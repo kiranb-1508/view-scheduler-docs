@@ -1,9 +1,10 @@
 """Regression tests over commit shapes captured from real Databricks writers.
 
 These are not invented. Each row below was produced by running the statement in
-the comment against a live workspace via tools/seed_fixtures.py, then reading it
-back with DESCRIBE HISTORY. They exist so a future change to the classifier
-cannot quietly break against the shapes that actually occur.
+the comment against a live workspace (the same operation classes the rig's
+write_slot emits), then reading it back with DESCRIBE HISTORY. They exist so a
+future change to the classifier cannot quietly break against the shapes that
+actually occur.
 """
 
 from datetime import timezone

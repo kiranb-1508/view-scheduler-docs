@@ -65,9 +65,7 @@ def statement_for(write: plan.Write, day) -> str:
     raise ValueError(f"unknown write kind: {write.kind}")
 
 
-def guard(statement: str) -> None:
-    if S not in statement:
-        raise SystemExit(f"refusing statement outside {S}:\n  {statement}")
+guard = plan.guard
 
 
 def pause_all_rig_jobs() -> None:
