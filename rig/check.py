@@ -24,9 +24,16 @@ from scheduler import obs  # noqa: E402
 from scheduler.client import Workspace  # noqa: E402
 from scheduler.config import Config  # noqa: E402
 from scheduler.recommend import recommend  # noqa: E402
-from scheduler.run import analyze  # noqa: E402
+from scheduler.run import _read, analyze  # noqa: E402
 
 CONFIG = Config()
+
+#: Refresh on their own Databricks schedules, not the slot matrix, so the plan
+#: cannot predict their exact times. They are validated for readability only.
+SCHEDULE_DRIVEN = {
+    "mv_daily": "materialized view (event-log fallback)",
+    "st_stream": "streaming table",
+}
 
 
 def qualified(table: str) -> str:
@@ -39,12 +46,35 @@ def check_view(ws: Workspace, view: str, tables: list[str], today) -> list[str]:
     print()
 
     actual = recommend(histories, CONFIG.buffer_min)
+    expected = oracle.expected_recommendation(
+        tables, today, CONFIG.buffer_min, CONFIG.days_history)
     names = {t: qualified(t) for t in tables}
-    problems = oracle.mismatches(oracle.expected(tables, today, CONFIG.buffer_min,
-                                                 CONFIG.days_history),
-                                 actual, names)
+    problems = oracle.mismatches(expected, actual, names)
     for item in skipped:
         problems.append(f"unexpectedly skipped: {item.name} — {item.reason}")
+    return problems
+
+
+def check_schedule_driven(ws: Workspace, today) -> list[str]:
+    """The only real-data coverage of the materialized-view event-log fallback.
+
+    mv_daily rejects DESCRIBE HISTORY and must be read through the event log;
+    st_stream reads through DESCRIBE HISTORY. Neither is predictable from the
+    plan, so assert only that its history is readable and non-empty in window.
+    """
+    problems: list[str] = []
+    for name, what in SCHEDULE_DRIVEN.items():
+        try:
+            commits = _read(ws, qualified(name))
+        except Exception as exc:
+            problems.append(f"{name} ({what}): history unreadable — {exc}")
+            continue
+        in_window = [c for c in commits
+                     if c.timestamp.astimezone(CONFIG.tz).date() >= plan.RIG_START]
+        if in_window:
+            print(f"  {name}: {len(in_window)} refresh(es) readable via {what}")
+        else:
+            problems.append(f"{name} ({what}): no refresh in the window")
     return problems
 
 
@@ -75,8 +105,18 @@ def main() -> int:
             print("  matches the plan")
         print()
 
+    # Only run the schedule-driven smoke on a full checkpoint, not a single view.
+    if len(sys.argv) == 1:
+        print("=" * 72)
+        print("schedule-driven objects (mv_daily, st_stream):")
+        sd_problems = check_schedule_driven(ws, today)
+        for problem in sd_problems:
+            print(f"    - {problem}")
+        failures += bool(sd_problems)
+        print()
+
     print("=" * 72)
-    print(f"{len(wanted) - failures}/{len(wanted)} views match the plan")
+    print(f"{len(wanted) - failures}/{len(wanted)} checks match the plan")
     return 1 if failures else 0
 
 

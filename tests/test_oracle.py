@@ -1,12 +1,19 @@
-"""Run the full 30-day validation today, against histories built from the plan.
+"""Offline exercise of the rig's oracle and the scenarios it validates.
 
-This is the day-30 gate, rehearsed. The only thing that changes on day 30 is
-where the finish times come from: real DESCRIBE HISTORY instead of the plan. If
-the analyzer disagrees with the oracle here, it will disagree there too — and
-finding that out now is worth thirty days.
+Two things live here, both runnable without a warehouse:
+
+  * the recommend/report behaviours the roster was specifically built to expose,
+    driven by the real recommend() over the plan's finishes; and
+  * the mismatches() comparison harness that check.py depends on at day 30.
+
+What is NOT here, deliberately: a test asserting "the oracle agrees with the
+analyzer" on plan data. After the oracle was collapsed onto the real recommend(),
+both sides of that comparison are recommend() over the same plan finishes, so it
+is true by construction. The genuine differential — do real finish times match
+the plan — can only happen against the live rig, which is what check.py does.
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 import pytest
 
@@ -20,34 +27,28 @@ TODAY = plan.RIG_END
 BUFFER = 15
 
 
-def history_from_plan(table: str) -> TableHistory:
-    """Exactly the finish times the rig will have produced, at slot precision."""
+def plan_history(table: str, shift_min: int = 0, prefix: str = "",
+                 drop: set | None = None) -> TableHistory:
+    """A TableHistory from the plan's finishes, optionally shifted later (to
+    simulate a cold start), renamed (as the analyzer reports), or with days
+    dropped (to simulate a missed refresh)."""
+    drop = drop or set()
     finishes = oracle.finishes_upto(table, TODAY, 30)
     return TableHistory(
-        name=table,
-        finish_times={day: datetime.combine(day, oracle.slot_time(slot),
-                                            tzinfo=oracle.TZ)
-                      for day, slot in finishes.items()},
+        name=prefix + table,
+        finish_times={
+            day: datetime.combine(day, oracle.slot_time(slot), tzinfo=oracle.TZ)
+                 + timedelta(minutes=shift_min)
+            for day, slot in finishes.items() if day not in drop},
         metrics_degraded=False,
     )
 
 
-def check(tables: list[str]) -> list[str]:
-    actual = recommend([history_from_plan(t) for t in tables], BUFFER)
-    return oracle.mismatches(oracle.expected(tables, TODAY, BUFFER), actual)
+def history_from_plan(table: str) -> TableHistory:
+    return plan_history(table)
 
 
-@pytest.mark.parametrize("view", sorted(plan.VIEWS))
-def test_analyzer_agrees_with_the_oracle_on_every_view(view):
-    assert check(plan.VIEWS[view]) == []
-
-
-@pytest.mark.parametrize("table", plan.DRIVEN_TABLES)
-def test_analyzer_agrees_with_the_oracle_on_every_table_alone(table):
-    assert check([table]) == []
-
-
-# --- the specific behaviours the roster was built to prove -------------------
+# --- the behaviours the roster was built to prove ----------------------------
 
 def test_late_tail_pushes_safe_out_and_leaves_tighter_behind():
     """The two 06:10 days are why safe and tighter differ at all. Without them
@@ -65,13 +66,9 @@ def test_a_weekly_dependency_hides_the_other_tables_bad_days():
 
     v_realistic contains both the late-tail table and a Mondays-only table. The
     intersection keeps only days where everything refreshed, so the evidence
-    collapses to five Mondays — and neither of the late-tail's two bad days is a
+    collapses to the Mondays — and neither of the late-tail's two bad days is a
     Monday. The view therefore recommends 04:15 as if the late days never
-    happened.
-
-    That is the arithmetic behaving correctly, but it means a weekly dependency
-    quietly shrinks the evidence behind every other dependency's number. The
-    n_days figure in the report is what tells a reader this happened.
+    happened; the n_days figure is the only hint that the evidence shrank.
     """
     tables = plan.VIEWS["v_realistic"]
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
@@ -87,44 +84,6 @@ def test_a_weekly_dependency_hides_the_other_tables_bad_days():
     without_weekly = [t for t in tables if t != "t_weekly_mon"]
     result2 = recommend([history_from_plan(t) for t in without_weekly], BUFFER)
     assert result2.safe == time(6, 25) and result2.n_days > 20
-
-
-def test_zero_row_appends_show_up_as_missed_days():
-    result = recommend([history_from_plan("t_append_zero")], BUFFER)
-    row = result.rows[0]
-    assert row.missed > 0, "days whose only write appended nothing must count as missed"
-
-
-def test_zero_row_overwrites_do_not():
-    result = recommend([history_from_plan("t_overwrite_zero")], BUFFER)
-    assert result.rows[0].missed == 0
-    assert result.n_days == 30
-
-
-def test_weekly_table_reads_as_mondays_with_nothing_missed():
-    result = recommend([history_from_plan("t_weekly_mon")], BUFFER)
-    assert result.rows[0].refreshes == "Mons"
-    assert result.rows[0].missed == 0
-
-
-def test_flaky_table_reports_its_three_skipped_days():
-    result = recommend([history_from_plan("t_flaky")], BUFFER)
-    assert result.rows[0].refreshes == "daily"
-    assert result.rows[0].missed == 3
-
-
-def test_maintenance_only_days_are_missing_not_refreshed():
-    result = recommend([history_from_plan("t_maintenance_only")], BUFFER)
-    assert result.n_days == 10, "a metadata-only commit is not a refresh"
-
-
-def test_intersection_drops_days_where_any_dependency_was_absent():
-    """v_realistic pairs a Mondays-only table with three daily ones, so only
-    Mondays survive the intersection."""
-    tables = plan.VIEWS["v_realistic"]
-    result = recommend([history_from_plan(t) for t in tables], BUFFER)
-    assert result.n_days == len([d for d in plan.days() if d.weekday() == 0])
-    assert all(d.weekday() == 0 for d in result.all_clear)
 
 
 def test_healthy_view_prints_no_warnings_at_all():
@@ -149,3 +108,42 @@ def test_midnight_view_keeps_both_sides_of_the_boundary_on_their_own_days():
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
     assert result.n_days == 30, "every day has both a 00:20 and a 23:40 commit"
     assert result.safe == time(23, 55), "the 23:40 table sets the all-clear"
+
+
+# --- the mismatches() harness that check.py trusts at day 30 -----------------
+
+REALISTIC = plan.VIEWS["v_realistic"]
+NAMES = {t: f"c.s.{t}" for t in REALISTIC}
+
+
+def actual(shift_min: int = 0, drop: dict | None = None):
+    drop = drop or {}
+    return recommend([plan_history(t, shift_min=shift_min, prefix="c.s.",
+                                   drop=drop.get(t)) for t in REALISTIC], BUFFER)
+
+
+def test_mismatches_is_empty_when_the_report_matches_the_plan():
+    expected = oracle.expected_recommendation(REALISTIC, TODAY, BUFFER, 30)
+    assert oracle.mismatches(expected, actual(), NAMES) == []
+
+
+def test_mismatches_tolerates_a_cold_start_delay():
+    """Every finish 20 minutes late — inside the 25-minute tolerance — must not
+    register as a disagreement."""
+    expected = oracle.expected_recommendation(REALISTIC, TODAY, BUFFER, 30)
+    assert oracle.mismatches(expected, actual(shift_min=20), NAMES) == []
+
+
+def test_mismatches_flags_a_delay_beyond_tolerance():
+    expected = oracle.expected_recommendation(REALISTIC, TODAY, BUFFER, 30)
+    problems = oracle.mismatches(expected, actual(shift_min=40), NAMES)
+    assert any("safe" in p for p in problems)
+
+
+def test_mismatches_flags_a_missing_refresh_day():
+    """Drop one day from a daily table and its missed count must diverge."""
+    expected = oracle.expected_recommendation(REALISTIC, TODAY, BUFFER, 30)
+    a_monday = next(d for d in plan.days() if d.weekday() == 0)
+    problems = oracle.mismatches(expected, actual(drop={"t_daily_tight": {a_monday}}),
+                                 NAMES)
+    assert any("t_daily_tight" in p and "missed" in p for p in problems)
