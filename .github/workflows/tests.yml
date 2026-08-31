@@ -1,0 +1,25 @@
+name: tests
+
+# Runs on pull requests and on main. Not on every branch push, which would
+# double-run each PR commit.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # pytest.ini puts src/ on the path; the rig tests add rig/ themselves,
+      # relative to the repository root.
+      - run: pytest

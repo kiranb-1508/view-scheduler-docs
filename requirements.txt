@@ -1,0 +1,6 @@
+# The scheduler talks to Databricks through the SDK.
+databricks-sdk>=0.30
+
+# Tests only. Every test in the suite runs offline — no Spark session, no
+# network, no credentials — so this is all CI needs.
+pytest>=7.0
