@@ -89,6 +89,20 @@ def _median_time(times: Sequence[datetime]) -> time | None:
     return (datetime.min + timedelta(seconds=middle)).time()
 
 
+def observed_span(histories: Sequence[TableHistory]) -> list[date]:
+    """Every calendar day between the first and last refresh seen anywhere.
+
+    Contiguous, not the set of days something actually refreshed on. Using the
+    union of observed days makes a miss invisible whenever every dependency
+    skipped the same day — and for a single dependency it makes `missed`
+    permanently zero, because the only days in the span are the days it ran.
+    """
+    seen = sorted(set().union(*(set(h.finish_times) for h in histories)) or set())
+    if not seen:
+        return []
+    return [seen[0] + timedelta(days=i) for i in range((seen[-1] - seen[0]).days + 1)]
+
+
 def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendation:
     """The two numbers, plus the evidence behind them.
 
@@ -105,8 +119,7 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     for history in histories[1:]:
         common &= set(history.finish_times)
 
-    span = sorted(set().union(*(set(h.finish_times) for h in histories)))
-    rows = build_rows(histories, span)
+    rows = build_rows(histories, observed_span(histories))
 
     if not common:
         return Recommendation(None, None, 0, rows, {})
