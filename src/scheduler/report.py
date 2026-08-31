@@ -46,11 +46,14 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
     lines.append("")
 
     if result.rows:
-        lines.append(f"{'DEPENDENCY':<38}{'REFRESHES':<12}{'USUAL':<8}"
+        # Size the name column to the longest name. Fully-qualified names run
+        # long, and a fixed width silently welds the name to the next column.
+        width = max([len(r.name) for r in result.rows] + [len("DEPENDENCY")]) + 2
+        lines.append(f"{'DEPENDENCY':<{width}}{'REFRESHES':<12}{'USUAL':<8}"
                      f"{'WORST':<8}{'MISSED'}")
         for row in sorted(result.rows, key=lambda r: r.name):
             lines.append(
-                f"{row.name:<38}{row.refreshes:<12}{_hhmm(row.usual):<8}"
+                f"{row.name:<{width}}{row.refreshes:<12}{_hhmm(row.usual):<8}"
                 f"{_hhmm(row.worst):<8}{row.missed}")
 
     warnings = _warnings(result, skipped, window_days)
