@@ -25,7 +25,7 @@ def _plural(n: int, word: str) -> str:
 
 
 def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
-           timezone: str, window_days: int) -> str:
+           timezone: str) -> str:
     lines: list[str] = []
     deps = len(result.rows)
     lines.append(f"VIEW   {view}")
@@ -56,15 +56,14 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
                 f"{row.name:<{width}}{row.refreshes:<12}{_hhmm(row.usual):<8}"
                 f"{_hhmm(row.worst):<8}{row.missed}")
 
-    warnings = _warnings(result, skipped, window_days)
+    warnings = _warnings(result, skipped)
     if warnings:
         lines.append("")
         lines.extend(warnings)
     return "\n".join(lines)
 
 
-def _warnings(result: Recommendation, skipped: Sequence[Skipped],
-              window_days: int) -> list[str]:
+def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
     """Only what applies to the view in front of you."""
     out: list[str] = []
 
@@ -74,7 +73,8 @@ def _warnings(result: Recommendation, skipped: Sequence[Skipped],
                        f"not be fresh on other days")
     for row in sorted(result.rows, key=lambda r: r.name):
         if row.missed:
-            out.append(f"!  {row.name} missed {row.missed} of {window_days} days "
+            out.append(f"!  {row.name} missed {row.missed} of "
+                       f"{result.span_days} observed days "
                        f"— no schedule time fixes that")
     for row in sorted(result.rows, key=lambda r: r.name):
         if row.degraded:

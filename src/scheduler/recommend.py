@@ -31,6 +31,7 @@ class Recommendation:
     safe: time | None           # worst all-clear + buffer
     tighter: time | None        # second-worst all-clear + buffer
     n_days: int                 # days where every dependency refreshed
+    span_days: int = 0          # observed span the `missed` counts are over
     rows: list[DependencyRow] = field(default_factory=list)
     all_clear: dict = field(default_factory=dict)   # date -> datetime
 
@@ -113,16 +114,17 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     """
     histories = list(histories)
     if not histories:
-        return Recommendation(None, None, 0, [], {})
+        return Recommendation(None, None, 0, 0, [], {})
 
     common = set(histories[0].finish_times)
     for history in histories[1:]:
         common &= set(history.finish_times)
 
-    rows = build_rows(histories, observed_span(histories))
+    span = observed_span(histories)
+    rows = build_rows(histories, span)
 
     if not common:
-        return Recommendation(None, None, 0, rows, {})
+        return Recommendation(None, None, 0, len(span), rows, {})
 
     all_clear = {
         day: max(h.finish_times[day] for h in histories) for day in sorted(common)
@@ -134,7 +136,7 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe = _plus(ordered[-1], buffer_min)
     tighter = _plus(ordered[-2], buffer_min) if len(ordered) >= 2 else safe
-    return Recommendation(safe, tighter, len(common), rows, all_clear)
+    return Recommendation(safe, tighter, len(common), len(span), rows, all_clear)
 
 
 def _plus(moment: datetime, minutes: int) -> time:

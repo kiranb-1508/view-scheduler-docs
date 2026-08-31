@@ -134,7 +134,7 @@ def test_intersection_drops_days_where_any_dependency_was_absent():
 def test_healthy_view_prints_no_warnings_at_all():
     tables = plan.VIEWS["v_healthy"]
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
-    text = render("v_healthy", result, [], "Asia/Kolkata", 30)
+    text = render("v_healthy", result, [], "Asia/Kolkata")
     assert "!" not in text, text
 
 
@@ -143,7 +143,7 @@ def test_broken_view_refuses_to_invent_a_time():
     histories = [history_from_plan(t) for t in tables if t in plan.DRIVEN_TABLES]
     histories.append(TableHistory("t_dormant", {}, 30, False))
     result = recommend(histories, BUFFER)
-    text = render("v_broken", result, [], "Asia/Kolkata", 30)
+    text = render("v_broken", result, [], "Asia/Kolkata")
     assert result.safe is None
     assert "NO RECOMMENDATION" in text and "START AT" not in text
 

@@ -11,7 +11,7 @@ rather than eyeballed.
 
 ## Window
 
-`2026-08-31` → `2026-09-29`. Past the end date the task pauses all seven jobs
+`2026-09-01` → `2026-09-30`. Past the end date the task pauses all seven jobs
 instead of writing.
 
 ## Layout

@@ -34,7 +34,7 @@ def analyze(view: str, ws: Workspace, config: Config,
         histories.append(summarize(table, commits, today, config.days_history, config.tz))
 
     result = recommend(histories, config.buffer_min)
-    text = render(view, result, skipped, config.timezone, config.days_history)
+    text = render(view, result, skipped, config.timezone)
     return text, histories, skipped
 
 

@@ -9,7 +9,7 @@
 # contains "sched_rig" instead of writing. `databricks bundle destroy` removes
 # them outright.
 #
-# Window: 2026-08-31 to 2026-09-29.
+# Window: 2026-09-01 to 2026-09-30.
 
 bundle:
   name: sched_rig
