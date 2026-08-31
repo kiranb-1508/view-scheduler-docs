@@ -98,7 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     today = datetime.now(TZ).date()
     print(f"slot={args.slot} day={today} window={plan.RIG_START}..{plan.RIG_END}")
 
-    if not plan.is_active(today):
+    if today < plan.RIG_START:
+        # Deployed ahead of the window. Do nothing, and above all do not pause:
+        # pausing here would stop the rig before it ever ran a single day.
+        print("before the window opens — nothing to do")
+        return 0
+
+    if today > plan.RIG_END:
         pause_all_rig_jobs()
         return 0
 
@@ -121,4 +127,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Called, not sys.exit()ed: serverless runs this file inside an IPython
+    # shell where a SystemExit propagates and fails the workload even at code 0.
+    # The first smoke run wrote all nine statements and was still marked FAILED
+    # for exactly that reason. A real error still fails the task by raising.
+    main()

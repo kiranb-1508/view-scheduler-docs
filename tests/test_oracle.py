@@ -79,8 +79,9 @@ def test_a_weekly_dependency_hides_the_other_tables_bad_days():
     """
     tables = plan.VIEWS["v_realistic"]
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
+    mondays = len([d for d in plan.days() if d.weekday() == 0])
     assert result.safe == time(4, 15)
-    assert result.n_days == 5
+    assert result.n_days == mondays
 
     late_days = {d for d, slot in plan.expected_finishes("t_daily_late_tail").items()
                  if slot == "06:10"}
@@ -126,7 +127,7 @@ def test_intersection_drops_days_where_any_dependency_was_absent():
     Mondays survive the intersection."""
     tables = plan.VIEWS["v_realistic"]
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
-    assert result.n_days == 5
+    assert result.n_days == len([d for d in plan.days() if d.weekday() == 0])
     assert all(d.weekday() == 0 for d in result.all_clear)
 
 
