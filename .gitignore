@@ -1,3 +1,9 @@
 # Databricks agent skills, re-installed by .claude/hooks/session-start.sh
 .databricks/
 .claude/skills/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
