@@ -38,16 +38,16 @@ def test_nothing_is_written_outside_the_window():
         assert all(plan.writes_for(slot, day) == [] for slot in plan.SLOTS)
 
 
-# --- the asymmetry the rig exists to prove -----------------------------------
+# --- zero-row writes: a write is a refresh, whatever the mode -----------------
 
-def test_zero_row_overwrite_qualifies_but_zero_row_append_does_not():
-    """Both tables take the same zero/non-zero decision on the same days. The
-    overwrite table should show 30 refreshed days and the append table fewer —
-    that gap is the design's rule made visible in real data."""
+def test_zero_row_write_counts_whether_overwrite_or_append():
+    """Both tables write 0 rows on the same one-third of days. Under the rule
+    that any write is a refresh, both show all 30 days — the mode does not
+    change the verdict, only the class."""
     overwrite = plan.expected_finishes("t_overwrite_zero")
     append = plan.expected_finishes("t_append_zero")
     assert len(overwrite) == 30
-    assert 8 <= len(append) < 30, "zero-row appends must not count as refreshes"
+    assert len(append) == 30, "a zero-row append still means the pipeline ran"
 
 
 def test_maintenance_only_days_are_not_refreshes():

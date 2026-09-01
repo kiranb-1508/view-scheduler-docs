@@ -49,12 +49,18 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
         # Size the name column to the longest name. Fully-qualified names run
         # long, and a fixed width silently welds the name to the next column.
         width = max([len(r.name) for r in result.rows] + [len("DEPENDENCY")]) + 2
-        lines.append(f"{'DEPENDENCY':<{width}}{'REFRESHES':<12}{'USUAL':<8}"
-                     f"{'WORST':<8}{'MISSED'}")
+        # Size REFRESHES too: a multi-weekday label like "Tue,Wed,Thu,Fri" is
+        # wider than a fixed column and would weld to the next one.
+        rw = max([len(r.refreshes) for r in result.rows] + [len("REFRESHES")]) + 2
+        # DAYS = days this dependency actually refreshed in the window. A number
+        # far below the others is what shrank the all-clear count, so it belongs
+        # on screen next to the timing.
+        lines.append(f"{'DEPENDENCY':<{width}}{'REFRESHES':<{rw}}{'USUAL':<8}"
+                     f"{'WORST':<8}{'DAYS':<6}{'MISSED'}")
         for row in sorted(result.rows, key=lambda r: r.name):
             lines.append(
-                f"{row.name:<{width}}{row.refreshes:<12}{_hhmm(row.usual):<8}"
-                f"{_hhmm(row.worst):<8}{row.missed}")
+                f"{row.name:<{width}}{row.refreshes:<{rw}}{_hhmm(row.usual):<8}"
+                f"{_hhmm(row.worst):<8}{row.observed_days:<6}{row.missed}")
 
     warnings = _warnings(result, skipped)
     if warnings:
@@ -76,10 +82,26 @@ def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
             out.append(f"!  {row.name} missed {row.missed} of "
                        f"{result.span_days} observed days "
                        f"— no schedule time fixes that")
+    # A late outlier day pins `safe` for the whole month; name it so the reader
+    # knows `tighter` is the truer number. (E2)
+    for row in sorted(result.rows, key=lambda r: r.name):
+        if row.outlier_day:
+            out.append(f"!  {row.name} was unusually late on "
+                       f"{row.outlier_day.isoformat()} ({_hhmm(row.worst)} vs "
+                       f"usual {_hhmm(row.usual)}) — that one day sets the safe "
+                       f"time; without it, tighter applies")
+    # Continuously-refreshed tables have a meaningless "first commit of day"
+    # finish that runs early — the recommendation reads it as ready too soon. (E3)
+    for row in sorted(result.rows, key=lambda r: r.name):
+        if row.continuous:
+            out.append(f"!  {row.name} refreshes many times a day — its time is a "
+                       f"floor, not when it is actually caught up; verify before "
+                       f"trusting an early start")
     for row in sorted(result.rows, key=lambda r: r.name):
         if row.degraded:
             out.append(f"!  {row.name} writes without row metrics — its commits "
-                       f"are counted but not verified")
+                       f"are counted but not verified, so a skipped day cannot be "
+                       f"detected for it")
     for row in sorted(result.rows, key=lambda r: r.name):
         if row.refreshes == "never":
             out.append(f"!  {row.name} has no qualifying refresh in the window "
@@ -92,6 +114,12 @@ def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
             out.append(f"     {item.name} — {item.reason}")
 
     if result.n_days and result.n_days < 10:
-        out.append(f"!  only {_plural(result.n_days, 'complete day')} of history "
-                   f"— the recommendation is weakly evidenced")
+        starved = min((r for r in result.rows), key=lambda r: r.observed_days,
+                      default=None)
+        culprit = (f" — {starved.name} has only "
+                   f"{_plural(starved.observed_days, 'day')}"
+                   if starved and starved.observed_days <= result.n_days else "")
+        out.append(f"!  only {_plural(result.n_days, 'complete day')} where every "
+                   f"dependency refreshed{culprit}; the recommendation is weakly "
+                   f"evidenced")
     return out

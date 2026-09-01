@@ -43,3 +43,4 @@ class TableHistory:
     name: str
     finish_times: dict = field(default_factory=dict)   # date -> aware datetime
     metrics_degraded: bool = False
+    continuous: bool = False       # refreshed many times a day; finish is a floor

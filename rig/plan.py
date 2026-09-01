@@ -62,14 +62,12 @@ class Write:
     def qualifies(self) -> bool:
         """Whether the scheduler should count this as a refresh.
 
-        Mirrors the rules in scheduler.history, stated independently here so
-        the oracle is not merely echoing the code under test.
+        Mirrors the rule in scheduler.history: any write counts — a full replace
+        or an incremental — regardless of row count. A zero-row append still
+        means the pipeline ran that day. Only the metadata-only TOUCH is not a
+        refresh.
         """
-        if self.kind == TOUCH:
-            return False              # metadata only, never a refresh
-        if self.kind == OVERWRITE:
-            return True               # a rebuild that produced nothing still ran
-        return self.rows > 0          # append and merge need rows
+        return self.kind != TOUCH
 
 
 def days() -> list[date]:

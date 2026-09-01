@@ -12,10 +12,17 @@ passed in.
 
 from __future__ import annotations
 
+import statistics
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Iterable
 
 from .models import Commit, TableHistory
+
+#: A table with at least this many qualifying commits on a typical day is
+#: refreshed too often for "first commit of the day" to mean "when it was ready"
+#: — it looks continuous (streaming, CDC, micro-batch). Flagged, not modelled.
+CONTINUOUS_COMMITS_PER_DAY = 6
 
 #: Names that always mean the table was rebuilt from scratch.
 FULL_REPLACE = {
@@ -37,13 +44,6 @@ IGNORE = {
     "RESTORE", "CLONE", "ADD CONSTRAINT", "DROP CONSTRAINT", "LIQUID CLUSTERING",
     "RENAME COLUMN", "UPGRADE PROTOCOL", "SET COLUMN COMMENT",
 }
-
-#: Metric keys that each mean "rows landed".
-ROW_KEYS = (
-    "numOutputRows", "numTargetRowsInserted", "numTargetRowsUpdated",
-    "numTargetRowsDeleted", "numTargetRowsCopied", "numCopiedRows",
-    "numUpdatedRows", "numInsertedRows", "numAddedRows",
-)
 
 FULL_REPLACE_CLASS = "full_replace"
 INCREMENTAL_CLASS = "incremental"
@@ -70,18 +70,6 @@ def classify(commit: Commit) -> str:
     return IGNORE_CLASS
 
 
-def rows_written(metrics: dict[str, str] | None) -> int:
-    if not metrics:
-        return 0
-    total = 0
-    for key in ROW_KEYS:
-        try:
-            total += int(metrics.get(key, 0) or 0)
-        except (TypeError, ValueError):
-            continue
-    return total
-
-
 def has_metrics(commit: Commit) -> bool:
     """False when the writer emitted no usable metrics at all.
 
@@ -92,14 +80,20 @@ def has_metrics(commit: Commit) -> bool:
 
 
 def qualifying(commit: Commit) -> bool:
-    """Did this commit refresh the table?"""
-    kind = classify(commit)
-    if kind == IGNORE_CLASS:
-        return False
-    if kind == FULL_REPLACE_CLASS:
-        return True          # a recompute that produced zero rows still ran
-    if not has_metrics(commit):
-        return True          # degraded — counted, and the table gets flagged
+    """Did this commit refresh the table?
+
+    Any write counts — a full replace or an incremental load, regardless of row
+    count. An incremental that wrote zero rows still means the pipeline ran that
+    day (a quiet day with no new data), which is treated as refreshed. Only
+    maintenance and metadata operations are not a refresh.
+
+    The cost, accepted deliberately: a day the pipeline genuinely did not run and
+    a day it ran but wrote nothing are indistinguishable from the commit log, and
+    an ad-hoc one-row correction counts the same as the scheduled load. The
+    report's per-dependency evidence and the runtime gate are where those are
+    meant to surface.
+    """
+    return classify(commit) != IGNORE_CLASS
     return rows_written(commit.metrics) > 0
 
 
@@ -131,10 +125,37 @@ def finish_times(commits: Iterable[Commit], today: date, days: int,
     return by_day
 
 
+def qualifying_per_day(commits: Iterable[Commit], today: date, days: int,
+                       tz) -> dict[date, int]:
+    """How many qualifying commits landed on each day in the window."""
+    cutoff = today - timedelta(days=days)
+    counts: Counter[date] = Counter()
+    for commit in commits:
+        if not qualifying(commit):
+            continue
+        day = commit.timestamp.astimezone(tz).date()
+        if day <= cutoff or day > today:
+            continue
+        counts[day] += 1
+    return dict(counts)
+
+
+def looks_continuous(commits: Iterable[Commit], today: date, days: int,
+                     tz) -> bool:
+    """True when a typical day carries many qualifying commits — the first of
+    the day then understates real freshness, so its finish time is only a
+    floor."""
+    per_day = qualifying_per_day(commits, today, days, tz)
+    if not per_day:
+        return False
+    return statistics.median(per_day.values()) >= CONTINUOUS_COMMITS_PER_DAY
+
+
 def summarize(name: str, commits: list[Commit], today: date, days: int,
               tz) -> TableHistory:
     return TableHistory(
         name=name,
         finish_times=finish_times(commits, today, days, tz),
         metrics_degraded=is_degraded(commits),
+        continuous=looks_continuous(commits, today, days, tz),
     )

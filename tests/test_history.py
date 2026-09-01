@@ -8,7 +8,7 @@ import pytest
 
 from scheduler.client import parse_json_field
 from scheduler.history import (
-    classify, finish_times, is_degraded, qualifying, rows_written, summarize,
+    classify, finish_times, is_degraded, qualifying, summarize,
 )
 from scheduler.models import Commit
 from tests import fixtures as f
@@ -71,8 +71,12 @@ def test_zero_row_full_replace_qualifies():
     assert qualifying(commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "0"}))
 
 
-def test_zero_row_incremental_does_not_qualify():
-    assert not qualifying(commit("WRITE", {"mode": "Append"}, {"numOutputRows": "0"}))
+def test_zero_row_incremental_still_qualifies():
+    """A quiet day with no new data: the incremental pipeline still ran, so it
+    counts as refreshed (deliberate — a genuinely-skipped day is indistinguishable
+    from the commit log)."""
+    assert qualifying(commit("WRITE", {"mode": "Append"}, {"numOutputRows": "0"}))
+    assert qualifying(commit("MERGE", {}, {"numTargetRowsUpdated": "0"}))
 
 
 def test_incremental_with_absent_metrics_qualifies_and_flags():
@@ -95,10 +99,6 @@ def test_full_replace_with_empty_metrics_does_not_flag_as_degraded():
 def test_maintenance_never_qualifies_however_many_rows_it_touched():
     assert not qualifying(commit("DELETE", {}, {"numDeletedRows": "9999"}))
     assert not qualifying(commit("OPTIMIZE", {}, {"numOutputRows": "9999"}))
-
-
-def test_merge_row_metrics_are_summed_across_keys():
-    assert rows_written({"numTargetRowsInserted": "3", "numTargetRowsUpdated": "4"}) == 7
 
 
 def test_operation_zoo_end_to_end():
@@ -138,3 +138,21 @@ def test_summarize_carries_the_degraded_flag():
     commits = [commit("MERGE", {}, None, f.at("2026-08-06", "04:00"))]
     summary = summarize("c.s.t", commits, date(2026, 8, 6), 30, UTC)
     assert summary.metrics_degraded and len(summary.finish_times) == 1
+
+
+# --- Tranche E: continuous detection -----------------------------------------
+
+def test_looks_continuous_true_for_many_commits_per_day():
+    from scheduler.history import looks_continuous
+    # 10 qualifying commits each on 3 days
+    commits = [commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
+                      f.at(f"2026-08-0{d}", f"{h:02d}:00"), version=d * 100 + h)
+               for d in (1, 2, 3) for h in range(10)]
+    assert looks_continuous(commits, date(2026, 8, 6), 30, UTC)
+
+
+def test_looks_continuous_false_for_once_a_day():
+    from scheduler.history import looks_continuous
+    commits = [commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
+                      f.at(f"2026-08-0{d}", "04:00"), version=d) for d in (1, 2, 3)]
+    assert not looks_continuous(commits, date(2026, 8, 6), 30, UTC)

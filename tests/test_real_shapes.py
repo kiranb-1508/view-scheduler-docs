@@ -34,9 +34,9 @@ CAPTURED = [
     # INSERT INTO ... SELECT ... FROM range(10, 20)
     ("append", c("WRITE", {"mode": "Append"}, {"numOutputRows": "10"}),
      "incremental", True),
-    # INSERT INTO ... FROM range(0)
+    # INSERT INTO ... FROM range(0) — a quiet day; the pipeline still ran
     ("append zero rows", c("WRITE", {"mode": "Append"}, {"numOutputRows": "0"}),
-     "incremental", False),
+     "incremental", True),
     # UPDATE ... SET v = v + 1 WHERE id < 5
     ("update", c("UPDATE", {}, {"numUpdatedRows": "5"}), "incremental", True),
     # MERGE INTO ... WHEN MATCHED / WHEN NOT MATCHED
@@ -55,14 +55,16 @@ def test_every_captured_commit_classifies_as_observed():
         assert qualifying(commit) is expected_qualifying, label
 
 
-def test_the_same_operation_name_carries_opposite_verdicts():
+def test_the_same_operation_name_carries_a_different_class():
     """The load-bearing fact, in the shapes a real warehouse emits: INSERT
     OVERWRITE and INSERT INTO both surface as a plain WRITE, and only the mode
-    separates a full rebuild from an appended nothing."""
+    separates a full rebuild from an incremental load. Both count as a refresh,
+    but classifying by name alone cannot even tell them apart."""
     overwrite = c("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "0"})
     append = c("WRITE", {"mode": "Append"}, {"numOutputRows": "0"})
     assert overwrite.operation == append.operation == "WRITE"
-    assert qualifying(overwrite) and not qualifying(append)
+    assert classify(overwrite) != classify(append)
+    assert qualifying(overwrite) and qualifying(append)
 
 
 def test_classifying_by_name_alone_would_lose_most_real_refreshes():

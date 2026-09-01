@@ -15,6 +15,12 @@ from .models import TableHistory
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
+#: The worst day is called an outlier when it sits this far above the table's
+#: usual finish AND beyond this many robust deviations (MAD) of its own spread.
+OUTLIER_FLOOR_MIN = 30
+OUTLIER_MAD_K = 3
+
+
 @dataclass(frozen=True)
 class DependencyRow:
     """One line of the report."""
@@ -23,7 +29,10 @@ class DependencyRow:
     usual: time | None      # median finish
     worst: time | None      # latest finish
     missed: int             # days in the common window it did not refresh
+    observed_days: int = 0  # days it actually refreshed in the window
     degraded: bool = False
+    continuous: bool = False        # refreshed many times a day; finish is a floor
+    outlier_day: date | None = None # the day that pins `worst`, if it is an outlier
 
 
 @dataclass(frozen=True)
@@ -69,17 +78,47 @@ def build_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[
         else:
             wanted = {d.weekday() for d in days}
             expected = {d for d in span if d.weekday() in wanted}
+        usual = _median_time(times)
+        # max of the clock times, not of the datetimes: the latest moment of
+        # day, which may not be on the latest day.
+        worst = max((t.time() for t in times), default=None)
         rows.append(DependencyRow(
             name=history.name,
             refreshes=label,
-            usual=_median_time(times),
-            # max of the clock times, not of the datetimes: the latest moment
-            # of day, which may not be on the latest day.
-            worst=max((t.time() for t in times), default=None),
+            usual=usual,
+            worst=worst,
             missed=len(expected - set(days)),
+            observed_days=len(days),
             degraded=history.metrics_degraded,
+            continuous=history.continuous,
+            outlier_day=_outlier_day(history.finish_times, usual, worst),
         ))
     return rows
+
+
+def _outlier_day(finish_times: dict, usual: time | None,
+                 worst: time | None) -> date | None:
+    """The day that pins `worst`, when `worst` stands out from the table's own
+    finishes far enough to call it an anomaly rather than the normal spread.
+
+    Uses the median absolute deviation, which one outlier cannot inflate the way
+    it inflates the max — so the test is "is the worst day unlike this table's
+    other days", not merely "is it the latest".
+    """
+    if usual is None or worst is None or len(finish_times) < 4:
+        return None
+    seconds = [t.hour * 3600 + t.minute * 60 + t.second
+               for t in (v.time() for v in finish_times.values())]
+    median = statistics.median(seconds)
+    mad = statistics.median([abs(s - median) for s in seconds])
+    worst_s = worst.hour * 3600 + worst.minute * 60 + worst.second
+    usual_s = usual.hour * 3600 + usual.minute * 60 + usual.second
+    if worst_s - usual_s <= OUTLIER_FLOOR_MIN * 60:
+        return None
+    if worst_s - median <= OUTLIER_MAD_K * mad:
+        return None
+    latest = max(finish_times.values(), key=lambda v: v.time())
+    return latest.date()
 
 
 def _median_time(times: Sequence[datetime]) -> time | None:

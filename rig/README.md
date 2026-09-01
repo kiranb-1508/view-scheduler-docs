@@ -43,8 +43,8 @@ task sleeping. Sleeping to fake jitter would burn hours of compute for nothing.
 | `t_daily_tight` | baseline; `usual` ≈ `worst` |
 | `t_daily_late_tail` | two late days, so `safe` and `tighter` diverge |
 | `t_daily_append` | incremental qualifying path |
-| `t_append_zero` | zero-row append must **not** count as a refresh |
-| `t_overwrite_zero` | zero-row overwrite **must** count |
+| `t_append_zero` | zero-row append still counts (the pipeline ran) |
+| `t_overwrite_zero` | zero-row overwrite counts, via a different class |
 | `t_merge` | row metrics under `numTargetRows*` keys |
 | `t_weekly_mon` | weekday labelling; `missed` stays 0 |
 | `t_flaky` | three skipped days become `missed` |
