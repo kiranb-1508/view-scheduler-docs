@@ -2,10 +2,10 @@
 import os
 import sys
 
-from scheduler import obs
-from scheduler.client import Workspace
-from scheduler.history import classify, has_metrics, qualifying
-from scheduler.run import _read
+from view_scheduler import obs
+from view_scheduler.client import Workspace
+from view_scheduler.history import classify, has_metrics, qualifying
+from view_scheduler.run import _read
 
 if len(sys.argv) < 2:
     sys.exit("usage: classify_real.py <catalog.schema.table> ...")

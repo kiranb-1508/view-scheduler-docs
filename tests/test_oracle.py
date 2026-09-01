@@ -19,9 +19,9 @@ import pytest
 
 import oracle
 import plan
-from scheduler.models import TableHistory
-from scheduler.recommend import recommend
-from scheduler.report import render
+from view_scheduler.models import TableHistory
+from view_scheduler.recommend import recommend
+from view_scheduler.report import render
 
 TODAY = plan.RIG_END
 BUFFER = 15

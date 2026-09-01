@@ -22,8 +22,8 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import plan
-from scheduler.models import TableHistory
-from scheduler.recommend import Recommendation, recommend
+from view_scheduler.models import TableHistory
+from view_scheduler.recommend import Recommendation, recommend
 
 TZ = ZoneInfo("Asia/Kolkata")
 

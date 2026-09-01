@@ -62,7 +62,7 @@ class Write:
     def qualifies(self) -> bool:
         """Whether the scheduler should count this as a refresh.
 
-        Mirrors the rule in scheduler.history: any write counts — a full replace
+        Mirrors the rule in view_scheduler.history: any write counts — a full replace
         or an incremental — regardless of row count. A zero-row append still
         means the pipeline ran that day. Only the metadata-only TOUCH is not a
         refresh.
@@ -160,7 +160,7 @@ def writes_for(slot: str, day: date) -> list[Write]:
 def expected_finishes(table: str) -> dict[date, str]:
     """{day: slot} — the first qualifying commit of each day, per the plan.
 
-    This is what scheduler.history.finish_times should reproduce from the real
+    This is what view_scheduler.history.finish_times should reproduce from the real
     commit log.
     """
     out: dict[date, str] = {}

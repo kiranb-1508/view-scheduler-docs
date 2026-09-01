@@ -1,9 +1,9 @@
 """Walk a real view's dependencies and print both lists."""
 import sys
 
-from scheduler import obs
-from scheduler.client import Workspace
-from scheduler.walker import walk
+from view_scheduler import obs
+from view_scheduler.client import Workspace
+from view_scheduler.walker import walk
 
 if len(sys.argv) < 2:
     sys.exit("usage: walk_real.py <catalog.schema.view>")

@@ -10,6 +10,30 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # pyproject declares requires-python = ">=3.10". Testing the ends plus the
+      # middle keeps that a verified claim rather than an assertion.
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # pytest.ini puts src/ on the path; the rig tests add rig/ themselves,
+      # relative to the repository root.
+      - run: pytest
+
+  # Packaging breaks quietly — a bad pyproject only shows up at upload time
+  # unless something builds the wheel on every change.
+  package:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -18,8 +42,29 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - run: pip install -r requirements.txt
+      - run: pip install build
 
-      # pytest.ini puts src/ on the path; the rig tests add rig/ themselves,
-      # relative to the repository root.
-      - run: pytest
+      - run: python -m build --wheel
+
+      # Install the built wheel into a clean environment with no repo on the
+      # path, so anything that silently depended on PYTHONPATH=src fails here.
+      - name: Install the wheel standalone and smoke-test the entry points
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/wheeltest/bin/python -c "from view_scheduler import analyze, Config, Workspace"
+          /tmp/wheeltest/bin/view-scheduler --help > /dev/null
+
+      - name: The wheel must not carry the rig, tests or tools
+        run: |
+          if unzip -l dist/*.whl | grep -qE " (rig|tests|tools)/"; then
+            echo "repo-only directories leaked into the wheel:"
+            unzip -l dist/*.whl
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl

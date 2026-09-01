@@ -11,7 +11,7 @@ from datetime import timezone
 import pytest
 
 from conftest import FakeWorkspace
-from scheduler.client import (
+from view_scheduler.client import (
     failure_category, parse_json_field, read_history, read_mv_refreshes,
 )
 from tests import fixtures as f

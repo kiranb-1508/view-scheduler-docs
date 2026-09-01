@@ -1,17 +1,9 @@
-"""Run the analyzer against a real view."""
-import os
-import sys
+"""Shim so the repo-relative path keeps working.
 
-from scheduler import obs
-from scheduler.client import Workspace
-from scheduler.config import Config
-from scheduler.run import analyze
+The real entry point is the `view-scheduler` console script, which the package
+installs from view_scheduler.cli:main. This file exists only so that
+`PYTHONPATH=src python tools/analyze.py <view>` still does what it always did.
+"""
+from view_scheduler.cli import main
 
-if len(sys.argv) < 2:
-    sys.exit("usage: analyze.py <catalog.schema.view>")
-
-obs.setup()
-view = sys.argv[1]
-ws = Workspace(warehouse_id=os.environ["WAREHOUSE_ID"])
-text, _, _ = analyze(view, ws, Config())
-print("\n" + text + "\n")
+raise SystemExit(main())

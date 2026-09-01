@@ -9,8 +9,8 @@ with no network.
 from datetime import date, timezone
 
 from conftest import FakeWorkspace
-from scheduler.config import Config
-from scheduler.run import _reason, analyze
+from view_scheduler.config import Config
+from view_scheduler.run import _reason, analyze
 from tests import fixtures as f
 
 UTC = timezone.utc

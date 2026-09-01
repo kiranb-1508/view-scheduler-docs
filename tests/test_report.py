@@ -2,9 +2,9 @@
 
 from datetime import date, time
 
-from scheduler.models import Skipped, TableHistory
-from scheduler.recommend import recommend
-from scheduler.report import render
+from view_scheduler.models import Skipped, TableHistory
+from view_scheduler.recommend import recommend
+from view_scheduler.report import render
 from tests import fixtures as f
 
 DAYS = [date(2026, 8, d) for d in range(1, 11)]
@@ -53,7 +53,7 @@ def test_no_overlapping_days_says_so_instead_of_inventing_a_time():
 
 
 def test_counts_read_grammatically_at_one_and_many():
-    from scheduler.report import _plural
+    from view_scheduler.report import _plural
     assert _plural(1, "dependency") == "1 dependency"
     assert _plural(2, "dependency") == "2 dependencies"
     assert _plural(1, "day") == "1 day"

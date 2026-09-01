@@ -1,6 +1,6 @@
 """Shared test scaffolding.
 
-FakeWorkspace stands in for scheduler.client.Workspace so the orchestration
+FakeWorkspace stands in for view_scheduler.client.Workspace so the orchestration
 and history-reading paths — everything reached only against a live warehouse —
 can be exercised offline. It dispatches sql() on the statement text so the same
 table can answer DESCRIBE HISTORY and event_log() differently, which is exactly

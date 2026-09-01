@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
 
 import plan  # noqa: E402
-from scheduler import obs  # noqa: E402
-from scheduler.client import Workspace  # noqa: E402
+from view_scheduler import obs  # noqa: E402
+from view_scheduler.client import Workspace  # noqa: E402
 
 S = plan.SCHEMA
 

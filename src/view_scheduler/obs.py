@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-logger = logging.getLogger("scheduler")
+logger = logging.getLogger("view_scheduler")
 
 
 def setup(level: int = logging.INFO) -> None:

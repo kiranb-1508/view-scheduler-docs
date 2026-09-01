@@ -6,11 +6,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from scheduler.client import parse_json_field
-from scheduler.history import (
+from view_scheduler.client import parse_json_field
+from view_scheduler.history import (
     classify, finish_times, is_degraded, qualifying, summarize,
 )
-from scheduler.models import Commit
+from view_scheduler.models import Commit
 from tests import fixtures as f
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -143,7 +143,7 @@ def test_summarize_carries_the_degraded_flag():
 # --- Tranche E: continuous detection -----------------------------------------
 
 def test_looks_continuous_true_for_many_commits_per_day():
-    from scheduler.history import looks_continuous
+    from view_scheduler.history import looks_continuous
     # 10 qualifying commits each on 3 days
     commits = [commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
                       f.at(f"2026-08-0{d}", f"{h:02d}:00"), version=d * 100 + h)
@@ -152,7 +152,7 @@ def test_looks_continuous_true_for_many_commits_per_day():
 
 
 def test_looks_continuous_false_for_once_a_day():
-    from scheduler.history import looks_continuous
+    from view_scheduler.history import looks_continuous
     commits = [commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
                       f.at(f"2026-08-0{d}", "04:00"), version=d) for d in (1, 2, 3)]
     assert not looks_continuous(commits, date(2026, 8, 6), 30, UTC)
@@ -163,14 +163,14 @@ def test_looks_continuous_false_for_once_a_day():
 def test_an_unrecognised_operation_is_not_silently_treated_as_maintenance():
     """An operation in none of the three sets is 'unknown', not 'ignore'. Both
     verdicts decline to count it, but only one can be reported."""
-    from scheduler.history import UNKNOWN_CLASS, classify
+    from view_scheduler.history import UNKNOWN_CLASS, classify
     assert classify(commit("REORG")) == UNKNOWN_CLASS
     assert classify(commit("OPTIMIZE")) == "ignore"
     assert not qualifying(commit("REORG")), "still conservative — it does not count"
 
 
 def test_unknown_operations_are_collected_by_name():
-    from scheduler.history import unknown_operations
+    from view_scheduler.history import unknown_operations
     commits = [commit("REORG"), commit("CLUSTER BY"), commit("REORG"),
                commit("OPTIMIZE"), commit("WRITE", {"mode": "Append"})]
     assert unknown_operations(commits) == ("CLUSTER BY", "REORG")

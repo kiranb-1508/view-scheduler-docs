@@ -4,8 +4,8 @@ outright: safe 06:25, tighter 05:45, buffer 15."""
 from datetime import date, time, timedelta
 from zoneinfo import ZoneInfo
 
-from scheduler.models import TableHistory
-from scheduler.recommend import recommend
+from view_scheduler.models import TableHistory
+from view_scheduler.recommend import recommend
 from tests import fixtures as f
 
 IST = ZoneInfo("Asia/Kolkata")
