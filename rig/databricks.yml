@@ -1,0 +1,159 @@
+# Fixture rig for the view materialization scheduler.
+#
+# Seven jobs, one per time slot, all running the same task with a different
+# --slot argument. What each slot writes on a given day is decided by
+# rig/plan.py, deterministically from the date, so the expected history can be
+# computed independently and asserted against the analyzer's output.
+#
+# The rig stops itself: past plan.RIG_END the task pauses every job whose name
+# contains "sched_rig" instead of writing. `databricks bundle destroy` removes
+# them outright.
+#
+# Window: 2026-09-01 to 2026-09-30.
+
+bundle:
+  name: sched_rig
+
+targets:
+  # development mode normally pauses schedules on deploy; each job sets
+  # pause_status UNPAUSED explicitly, which the deploy must honour. Verified
+  # after deploying rather than assumed.
+  dev:
+    mode: development
+    default: true
+
+resources:
+  jobs:
+    slot_0020:
+      name: sched_rig 00:20 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 20 0 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "00:20"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_0200:
+      name: sched_rig 02:00 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "02:00"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_0400:
+      name: sched_rig 04:00 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 0 4 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "04:00"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_0610:
+      name: sched_rig 06:10 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 10 6 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "06:10"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_0900:
+      name: sched_rig 09:00 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 0 9 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "09:00"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_1700:
+      name: sched_rig 17:00 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 0 17 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "17:00"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+    slot_2340:
+      name: sched_rig 23:40 IST
+      tags:
+        rig: sched_rig
+      schedule:
+        quartz_cron_expression: "0 40 23 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: write
+          spark_python_task:
+            python_file: ./write_slot.py
+            parameters: ["--slot", "23:40"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
