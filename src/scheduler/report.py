@@ -1,8 +1,4 @@
-"""Step 4 — render the one screen the whole product is.
-
-Warnings print only when they apply. No applicable warnings means the section is
-absent entirely, not empty.
-"""
+"""Render the text report. Warnings print only when they apply."""
 
 from __future__ import annotations
 
@@ -46,15 +42,8 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
     lines.append("")
 
     if result.rows:
-        # Size the name column to the longest name. Fully-qualified names run
-        # long, and a fixed width silently welds the name to the next column.
         width = max([len(r.name) for r in result.rows] + [len("DEPENDENCY")]) + 2
-        # Size REFRESHES too: a multi-weekday label like "Tue,Wed,Thu,Fri" is
-        # wider than a fixed column and would weld to the next one.
         rw = max([len(r.refreshes) for r in result.rows] + [len("REFRESHES")]) + 2
-        # DAYS = days this dependency actually refreshed in the window. A number
-        # far below the others is what shrank the all-clear count, so it belongs
-        # on screen next to the timing.
         lines.append(f"{'DEPENDENCY':<{width}}{'REFRESHES':<{rw}}{'USUAL':<8}"
                      f"{'WORST':<8}{'DAYS':<6}{'MISSED'}")
         for row in sorted(result.rows, key=lambda r: r.name):
@@ -70,39 +59,29 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
 
 
 def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
-    """Only what applies to the view in front of you."""
     out: list[str] = []
 
     for row in sorted(result.rows, key=lambda r: r.name):
         if row.refreshes not in ("daily", "never") and row.usual:
             out.append(f"!  {row.name} refreshes {row.refreshes} only → it will "
                        f"not be fresh on other days")
-    for row in sorted(result.rows, key=lambda r: r.name):
         if row.missed:
             out.append(f"!  {row.name} missed {row.missed} of "
                        f"{result.span_days} observed days "
                        f"— no schedule time fixes that")
-    # A late outlier day pins `safe` for the whole month; name it so the reader
-    # knows `tighter` is the truer number. (E2)
-    for row in sorted(result.rows, key=lambda r: r.name):
         if row.outlier_day:
             out.append(f"!  {row.name} was unusually late on "
                        f"{row.outlier_day.isoformat()} ({_hhmm(row.worst)} vs "
                        f"usual {_hhmm(row.usual)}) — that one day sets the safe "
                        f"time; without it, tighter applies")
-    # Continuously-refreshed tables have a meaningless "first commit of day"
-    # finish that runs early — the recommendation reads it as ready too soon. (E3)
-    for row in sorted(result.rows, key=lambda r: r.name):
         if row.continuous:
             out.append(f"!  {row.name} refreshes many times a day — its time is a "
                        f"floor, not when it is actually caught up; verify before "
                        f"trusting an early start")
-    for row in sorted(result.rows, key=lambda r: r.name):
         if row.degraded:
             out.append(f"!  {row.name} writes without row metrics — its commits "
                        f"are counted but not verified, so a skipped day cannot be "
                        f"detected for it")
-    for row in sorted(result.rows, key=lambda r: r.name):
         if row.refreshes == "never":
             out.append(f"!  {row.name} has no qualifying refresh in the window "
                        f"— it may be dormant, or written by a path we cannot read")

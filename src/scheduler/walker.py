@@ -1,9 +1,4 @@
-"""Step 1 — walk a view's dependencies down to the physical tables that gate it.
-
-One UC Tables API call per object: view_dependencies is not returned by
-listTables, so there is no bulk shortcut. Memoized on full name, so a shared
-subtree in a diamond is fetched once.
-"""
+"""Walk a view's dependency tree down to the physical tables that gate it."""
 
 from __future__ import annotations
 
@@ -23,12 +18,7 @@ Fetch = Callable[[str], dict]
 
 
 def _dependency_names(meta: dict) -> tuple[list[str], list[Skipped]]:
-    """Pull table names out of a view_dependencies payload.
-
-    The name is nested under a "table" key. A dependency with no "table" key is
-    a function dependency — it has no history to read, so it is skipped by name
-    rather than dropped.
-    """
+    """Extract table names from view_dependencies; skip function dependencies."""
     names: list[str] = []
     skipped: list[Skipped] = []
     deps: Iterable[dict] = (meta.get("view_dependencies") or {}).get("dependencies") or []
@@ -48,12 +38,7 @@ def _dependency_names(meta: dict) -> tuple[list[str], list[Skipped]]:
 
 
 def walk(fqn: str, fetch: Fetch, max_depth: int = MAX_DEPTH) -> tuple[list[str], list[Skipped]]:
-    """Return (gating tables, skipped) for a view.
-
-    Order is stable and each gating table appears once. A failure on one node
-    is recorded and the walk continues — a partial answer that names its gaps
-    beats no answer.
-    """
+    """Return (gating tables, skipped) for a view. Failures are recorded, not fatal."""
     gating: list[str] = []
     skipped: list[Skipped] = []
     seen: set[str] = set()

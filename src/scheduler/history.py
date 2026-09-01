@@ -1,14 +1,4 @@
-"""Step 2 — decide which commits count as a refresh, and when each day finished.
-
-The step most likely to be silently wrong. Operation class comes from
-operationParameters["mode"], not the operation name: the commonest name is a
-plain WRITE, and only its mode says whether it replaced the table or appended
-to it. Classify by name and most tables read as dormant — a confident wrong
-answer, not an error.
-
-Everything in this module is pure. Nothing reads the wall clock; `today` is
-passed in.
-"""
+"""Classify commits and extract per-day finish times. Pure — no I/O."""
 
 from __future__ import annotations
 
@@ -71,30 +61,13 @@ def classify(commit: Commit) -> str:
 
 
 def has_metrics(commit: Commit) -> bool:
-    """False when the writer emitted no usable metrics at all.
-
-    ADF and Synapse Link write through non-Spark paths and may emit nothing, or
-    an empty map. Both are degraded: we count the commit and flag the table.
-    """
+    """False when the writer emitted no usable metrics (None or empty dict)."""
     return bool(commit.metrics)
 
 
 def qualifying(commit: Commit) -> bool:
-    """Did this commit refresh the table?
-
-    Any write counts — a full replace or an incremental load, regardless of row
-    count. An incremental that wrote zero rows still means the pipeline ran that
-    day (a quiet day with no new data), which is treated as refreshed. Only
-    maintenance and metadata operations are not a refresh.
-
-    The cost, accepted deliberately: a day the pipeline genuinely did not run and
-    a day it ran but wrote nothing are indistinguishable from the commit log, and
-    an ad-hoc one-row correction counts the same as the scheduled load. The
-    report's per-dependency evidence and the runtime gate are where those are
-    meant to surface.
-    """
+    """Any write (full replace or incremental, including 0-row) counts as a refresh."""
     return classify(commit) != IGNORE_CLASS
-    return rows_written(commit.metrics) > 0
 
 
 def is_degraded(commits: Iterable[Commit]) -> bool:
@@ -106,12 +79,7 @@ def is_degraded(commits: Iterable[Commit]) -> bool:
 
 def finish_times(commits: Iterable[Commit], today: date, days: int,
                  tz) -> dict[date, datetime]:
-    """First qualifying commit of each day, as {local date: local timestamp}.
-
-    First, not last: it is the earliest moment the table was ready. Days are
-    local days in the configured timezone, which is why tz is required rather
-    than assumed.
-    """
+    """First qualifying commit of each local day → {date: timestamp}."""
     cutoff = today - timedelta(days=days)
     by_day: dict[date, datetime] = {}
     for commit in sorted(commits, key=lambda c: c.timestamp):
@@ -142,9 +110,7 @@ def qualifying_per_day(commits: Iterable[Commit], today: date, days: int,
 
 def looks_continuous(commits: Iterable[Commit], today: date, days: int,
                      tz) -> bool:
-    """True when a typical day carries many qualifying commits — the first of
-    the day then understates real freshness, so its finish time is only a
-    floor."""
+    """True when the median commits/day >= CONTINUOUS_COMMITS_PER_DAY."""
     per_day = qualifying_per_day(commits, today, days, tz)
     if not per_day:
         return False

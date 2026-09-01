@@ -1,7 +1,4 @@
-"""Steps 3 and 4 — roll up per-table finish times into two recommended clock times.
-
-Pure arithmetic. Nothing here reads the wall clock or the network.
-"""
+"""Roll up per-table finish times into two recommended clock times. Pure arithmetic."""
 
 from __future__ import annotations
 
@@ -46,11 +43,7 @@ class Recommendation:
 
 
 def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
-    """Describe which weekdays a table refreshes on, by observation.
-
-    No classifier: this is the set of weekdays seen, said in words. A human
-    reads "Mondays" faster than any cadence model decides it.
-    """
+    """'daily', 'Mondays', 'Mon,Thu', etc. — observed weekday pattern in words."""
     if not days:
         return "never"
     seen = sorted({d.weekday() for d in days})
@@ -96,23 +89,20 @@ def build_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[
     return rows
 
 
+def _to_seconds(t) -> int:
+    return t.hour * 3600 + t.minute * 60 + t.second
+
+
 def _outlier_day(finish_times: dict, usual: time | None,
                  worst: time | None) -> date | None:
-    """The day that pins `worst`, when `worst` stands out from the table's own
-    finishes far enough to call it an anomaly rather than the normal spread.
-
-    Uses the median absolute deviation, which one outlier cannot inflate the way
-    it inflates the max — so the test is "is the worst day unlike this table's
-    other days", not merely "is it the latest".
-    """
+    """The date that pins `worst`, if it stands out by MAD from the table's own spread."""
     if usual is None or worst is None or len(finish_times) < 4:
         return None
-    seconds = [t.hour * 3600 + t.minute * 60 + t.second
-               for t in (v.time() for v in finish_times.values())]
+    seconds = [_to_seconds(v.time()) for v in finish_times.values()]
     median = statistics.median(seconds)
     mad = statistics.median([abs(s - median) for s in seconds])
-    worst_s = worst.hour * 3600 + worst.minute * 60 + worst.second
-    usual_s = usual.hour * 3600 + usual.minute * 60 + usual.second
+    worst_s = _to_seconds(worst)
+    usual_s = _to_seconds(usual)
     if worst_s - usual_s <= OUTLIER_FLOOR_MIN * 60:
         return None
     if worst_s - median <= OUTLIER_MAD_K * mad:
@@ -124,19 +114,13 @@ def _outlier_day(finish_times: dict, usual: time | None,
 def _median_time(times: Sequence[datetime]) -> time | None:
     if not times:
         return None
-    seconds = [t.hour * 3600 + t.minute * 60 + t.second for t in times]
+    seconds = [_to_seconds(t) for t in times]
     middle = int(statistics.median(seconds))
     return (datetime.min + timedelta(seconds=middle)).time()
 
 
 def observed_span(histories: Sequence[TableHistory]) -> list[date]:
-    """Every calendar day between the first and last refresh seen anywhere.
-
-    Contiguous, not the set of days something actually refreshed on. Using the
-    union of observed days makes a miss invisible whenever every dependency
-    skipped the same day — and for a single dependency it makes `missed`
-    permanently zero, because the only days in the span are the days it ran.
-    """
+    """Contiguous date range from the earliest to latest refresh seen anywhere."""
     seen = sorted(set().union(*(set(h.finish_times) for h in histories)) or set())
     if not seen:
         return []
@@ -144,13 +128,7 @@ def observed_span(histories: Sequence[TableHistory]) -> list[date]:
 
 
 def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendation:
-    """The two numbers, plus the evidence behind them.
-
-    A day counts only if EVERY dependency refreshed on it — you wait for the
-    slowest table each day, not the average. Days where something did not run
-    are excluded from the timing and surface in the missed column instead,
-    because a table that misses days is a reliability problem no schedule fixes.
-    """
+    """Compute safe/tighter times from the intersection of all dependencies' refresh days."""
     histories = list(histories)
     if not histories:
         return Recommendation(None, None, 0, 0, [], {})
@@ -168,10 +146,7 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     all_clear = {
         day: max(h.finish_times[day] for h in histories) for day in sorted(common)
     }
-    # Order by clock time, not by datetime. The worst day is the one that
-    # finished latest in the day, which is rarely the most recent date — sorting
-    # the datetimes instead returns whatever happened last, which is a wrong
-    # answer that looks entirely plausible.
+    # Sort by clock time, not datetime — latest time of day, not most recent date.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe = _plus(ordered[-1], buffer_min)
     tighter = _plus(ordered[-2], buffer_min) if len(ordered) >= 2 else safe

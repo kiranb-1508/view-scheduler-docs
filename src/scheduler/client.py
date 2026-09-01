@@ -1,8 +1,4 @@
-"""The I/O layer. Everything that leaves the process lives here.
-
-READ ONLY: metadata reads and DESCRIBE HISTORY / event log queries. Nothing in
-this module writes, alters, optimizes, vacuums or drops anything.
-"""
+"""I/O layer. Read-only: metadata lookups, DESCRIBE HISTORY, event log queries."""
 
 from __future__ import annotations
 
@@ -12,13 +8,6 @@ from typing import Any
 from databricks.sdk import WorkspaceClient
 
 from . import obs
-
-# Retry is the SDK's job: its _base_client already retries throttles and
-# transient 5xx up to retry_timeout_seconds (default 300s) and honours
-# Retry-After. A hand-rolled loop here was both redundant and dead — it keyed
-# on an int status_code the SDK's DatabricksError does not carry, so it never
-# actually retried a real 429.
-
 
 class Workspace:
     """Thin wrapper over the SDK. One method per external call we make."""
@@ -30,12 +19,7 @@ class Workspace:
     # --- Unity Catalog -------------------------------------------------------
 
     def get_table(self, full_name: str) -> dict:
-        """Raw GET /api/2.1/unity-catalog/tables/{full_name}.
-
-        Deliberately raw rather than the typed SDK object: view_dependencies
-        nests the name under a "table" key, and keeping the wire shape means
-        the fixtures and the production path agree.
-        """
+        """Raw GET for a single table's metadata including view_dependencies."""
         with obs.call("uc.tables.get", full_name):
             return self.w.api_client.do(
                 "GET", f"/api/2.1/unity-catalog/tables/{full_name}")
@@ -62,12 +46,7 @@ class Workspace:
 
 
 def failure_category(exc: Exception) -> str:
-    """Coarse cause of an SDK / SQL failure, for turning into a human reason.
-
-    One place decides how a permission error or a missing object is recognised,
-    so the walker and the history reader classify the same way even though they
-    word their messages differently.
-    """
+    """Classify an SDK/SQL error as 'permission', 'not_found', 'mv_no_history', or 'other'."""
     text = str(exc).lower()
     if "permission" in text or "does not have" in text or "403" in text:
         return "permission"
@@ -79,8 +58,7 @@ def failure_category(exc: Exception) -> str:
 
 
 def parse_json_field(value: Any) -> dict | None:
-    """operationParameters/operationMetrics arrive as JSON strings over the SQL
-    API and as maps over Spark. None means the field was absent entirely."""
+    """Parse a JSON string or pass through a dict. None if absent or unparseable."""
     if value is None:
         return None
     if isinstance(value, dict):
@@ -118,19 +96,7 @@ def read_history(ws: "Workspace", table: str) -> list:
 
 
 def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
-    """Completed refreshes of a materialized view.
-
-    DESCRIBE HISTORY is rejected on a materialized view
-    (EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE), so refresh times come from the
-    pipeline event log instead. Two consequences worth knowing:
-
-      * The event log is per-pipeline, so update_progress/COMPLETED is the
-        pipeline finishing, not this table specifically. It is a conservative
-        proxy — never earlier than the table was ready.
-      * By default only the pipeline's run-as user can read it. A caller
-        without that access gets a permission error, which the caller turns
-        into a skipped entry rather than a crash.
-    """
+    """Read completed MV refreshes from the pipeline event log (DESCRIBE HISTORY is rejected on MVs)."""
     from .models import Commit
     statement = (
         "SELECT timestamp, "

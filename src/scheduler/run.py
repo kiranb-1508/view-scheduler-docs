@@ -1,7 +1,4 @@
-"""End-to-end entry point: view name in, report out.
-
-READ ONLY throughout.
-"""
+"""Entry point: view name in, report out. Read-only."""
 
 from __future__ import annotations
 

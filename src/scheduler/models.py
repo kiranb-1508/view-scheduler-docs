@@ -1,9 +1,4 @@
-"""Normalized shapes the pure functions work on.
-
-The I/O layer converts whatever DESCRIBE HISTORY or the event log returns into
-these, so every computation downstream is testable with no Spark session and no
-network.
-"""
+"""Data shapes shared across modules. No logic, no I/O."""
 
 from __future__ import annotations
 
@@ -13,13 +8,7 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class Commit:
-    """One row of DESCRIBE HISTORY, or one completed materialized-view refresh.
-
-    metrics is None when the writer emitted none at all (ADF and Synapse Link
-    write through non-Spark paths and may emit nothing). That is distinct from
-    an empty dict, which some Spark operations legitimately produce; both are
-    treated as degraded, but only None means "the field was absent".
-    """
+    """One row of DESCRIBE HISTORY or one MV refresh from the event log."""
 
     version: int
     timestamp: datetime

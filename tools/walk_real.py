@@ -1,9 +1,12 @@
-"""Phase 1 gate, real half: walk a real view and print both lists."""
+"""Walk a real view's dependencies and print both lists."""
 import sys
 
 from scheduler import obs
 from scheduler.client import Workspace
 from scheduler.walker import walk
+
+if len(sys.argv) < 2:
+    sys.exit("usage: walk_real.py <catalog.schema.view>")
 
 obs.setup()
 target = sys.argv[1]

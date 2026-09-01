@@ -6,8 +6,7 @@ arithmetic can be validated against something other than fixtures.
 Delta stamps a commit when it happens and there is no supported override, so
 this cannot be compressed: 30 days of history takes 30 days. What it *can* do is
 be predictable — every write is a function of `(table, date)` through md5, so the
-correct report is knowable in advance and the analyzer's output can be asserted
-rather than eyeballed.
+expected output is known in advance and can be checked automatically.
 
 ## Window
 
