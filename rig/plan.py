@@ -115,8 +115,10 @@ def writes_for(slot: str, day: date) -> list[Write]:
     if slot == "04:00":
         out.append(Write("t_daily_tight", OVERWRITE, 100))
         out.append(Write("t_daily_append", APPEND, 10))
-        # Zero rows on a third of days. The append must not qualify; the
-        # overwrite must, and that asymmetry is the whole test.
+        # Zero rows on a third of days, for both the append and the overwrite.
+        # Both must still qualify: a zero-row write means the pipeline ran on a
+        # quiet day. The pair proves the row count does not change the verdict,
+        # only the class.
         zero = die("t_zero", day) % 3 == 0
         out.append(Write("t_append_zero", APPEND, 0 if zero else 10))
         out.append(Write("t_overwrite_zero", OVERWRITE, 0 if zero else 10))

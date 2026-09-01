@@ -37,7 +37,8 @@ td code{background:transparent;padding:0;font-size:.83em}
 <section>
   <h2><span class="num">00</span>What it does</h2>
   <p>Input a Unity Catalog view name. Output a recommended daily start time plus the evidence behind it.</p>
-  <p>It talks to exactly two things: the <strong>UC Tables API</strong>, to find what the view depends on, and the <strong>Delta transaction log</strong> via Spark, to find when each dependency last finished. Everything else is arithmetic in memory. No state store, no database, nothing persisted between runs.</p>
+  <p>It talks to exactly two things: the <strong>UC Tables API</strong>, to find what the view depends on, and a <strong>SQL warehouse</strong> via the SDK's Statement Execution API, to read each dependency's commit history. Everything else is arithmetic in memory. No state store, no database, nothing persisted between runs. There is no Spark session — the tool runs anywhere the SDK does.</p>
+  <p>History comes from <code>DESCRIBE HISTORY</code> for ordinary tables. A <strong>materialized view rejects that statement</strong> (<code>EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE</code>), so refresh times fall back to the pipeline event log — <code>event_log(TABLE(mv))</code>, filtered to <code>update_progress</code> / <code>COMPLETED</code>. Two consequences: the event log is per-pipeline, so a completion means the pipeline finished rather than that one table specifically (a conservative proxy, never earlier than the table was ready); and by default only the pipeline's run-as user can read it, so a caller without that access gets a skipped entry rather than a crash.</p>
 </section>
 
 <hr>
@@ -227,9 +228,13 @@ td code{background:transparent;padding:0;font-size:.83em}
     if kind == "VIEW":
         tables, skipped = [], []
         for d in meta.get("view_dependencies", {}).get("dependencies", []):
-            if "table_full_name" not in d:  # function dependency
+            # The name is nested under a "table" key — reading d["table_full_name"]
+            # directly finds nothing and sends every dependency down the
+            # function branch, returning zero gating tables.
+            full_name = (d.get("table") or {}).get("table_full_name")
+            if not full_name:               # function or unrecognized shape
                 skipped.append((d, "function")); continue
-            t, s = walk(d["table_full_name"], seen)
+            t, s = walk(full_name, seen)
             tables += t; skipped += s
         return tables, skipped
 
@@ -237,7 +242,7 @@ td code{background:transparent;padding:0;font-size:.83em}
         return [fqn], []
 
     return [], [(fqn, kind)]                # FOREIGN, HMS, unreadable</code></pre>
-  <p>Run the calls concurrently with a small pool and back off on 429. A permission error on one node returns it as skipped rather than raising — a partial answer that names its gaps beats no answer.</p>
+  <p>A permission error on one node returns it as skipped rather than raising — a partial answer that names its gaps beats no answer. The walk is serial today; concurrency and 429 backoff are described in §08 as not yet built.</p>
 </section>
 
 <hr>
@@ -250,23 +255,29 @@ td code{background:transparent;padding:0;font-size:.83em}
       <thead><tr><th>Class</th><th>Matches</th><th>Qualifies when</th></tr></thead>
       <tbody>
         <tr><td><strong>Full replace</strong></td><td><code>WRITE</code> + <code>mode=Overwrite</code>, CREATE/REPLACE TABLE AS SELECT, INSERT OVERWRITE</td><td>Always — a recompute that produced zero rows still ran</td></tr>
-        <tr><td><strong>Incremental</strong></td><td><code>WRITE</code> + <code>mode=Append</code>, MERGE, UPDATE, COPY INTO, STREAMING UPDATE</td><td>Any row metric &gt; 0. If metrics are missing entirely, qualify and flag the table</td></tr>
+        <tr><td><strong>Incremental</strong></td><td><code>WRITE</code> + <code>mode=Append</code>, MERGE, UPDATE, COPY INTO, STREAMING UPDATE, and <code>WRITE</code> with no <code>mode</code> at all</td><td>Always — a zero-row append still means the pipeline ran that day</td></tr>
         <tr><td><strong>Ignore</strong></td><td>OPTIMIZE, VACUUM, DELETE, TRUNCATE, schema and property changes</td><td>Never</td></tr>
+        <tr><td><strong>Unknown</strong></td><td>Any operation name in none of the sets above</td><td>Never — but named in the report, so the gap is visible</td></tr>
       </tbody>
     </table>
   </div>
-  <pre><code>def qualifying(row):
-    op, p = row.operation, row.operationParameters or {}
-    m = row.operationMetrics or {}
-    if op in FULL_REPLACE or (op == "WRITE" and p.get("mode") == "Overwrite"):
-        return True                              # zero rows still counts
-    if op in INCREMENTAL or (op == "WRITE" and p.get("mode") == "Append"):
-        if not m: return True                    # degraded — flag the table
-        return rows_written(m) &gt; 0
-    return False</code></pre>
+  <pre><code>def classify(commit):
+    op = (commit.operation or "").upper()
+    mode = (commit.params or {}).get("mode")
+    if op in IGNORE:                                        return "ignore"
+    if op in FULL_REPLACE or (op == "WRITE" and mode == "Overwrite"):
+        return "full_replace"
+    if op in INCREMENTAL or (op == "WRITE" and mode == "Append"):
+        return "incremental"
+    if op == "WRITE":       return "incremental"   # no mode: non-Spark writer
+    if op == "MV REFRESH":  return "full_replace"
+    return "unknown"                               # named, never counted
+
+def qualifying(commit):
+    return classify(commit) in ("full_replace", "incremental")</code></pre>
   <div class="note warn">
-    <span class="tag">Test this first</span>
-    <p>ADF and Synapse Link write through non-Spark paths and may emit sparse or absent <code>operationMetrics</code>. The <code>if not m</code> branch is what stops those tables reading as dormant. Validate it against real tables of each kind before trusting any output — this failure is silent, not loud.</p>
+    <span class="tag">Row counts are not consulted</span>
+    <p>Any write counts, whatever the row count. The cost, accepted deliberately: a day the pipeline genuinely did not run and a day it ran but wrote nothing are indistinguishable from the commit log. <code>metrics_degraded</code> still flags tables whose writer emits no metrics (ADF and Synapse Link write through non-Spark paths), because for those a genuinely skipped day cannot be detected at all — the report says so.</p>
   </div>
 </section>
 
@@ -275,7 +286,7 @@ td code{background:transparent;padding:0;font-size:.83em}
 <section>
   <h2><span class="num">05</span>Steps 3 and 4 — Roll up and recommend</h2>
   <pre><code>def finish_times(table, days=30):
-    hist = spark.sql(f"DESCRIBE HISTORY {table}").collect()
+    hist = read_history(table)                    # SQL warehouse, not Spark
     good = [r for r in hist if qualifying(r) and within(r, days)]
     by_day = {}
     for r in sorted(good, key=lambda r: r.timestamp):
@@ -285,10 +296,19 @@ td code{background:transparent;padding:0;font-size:.83em}
 def recommend(tables, buffer_min=15):
     per_table = {t: finish_times(t) for t in tables}
     days = set.intersection(*(set(v) for v in per_table.values()))
-    all_clear = sorted(max(per_table[t][d] for t in tables) for d in days)
-    return (all_clear[-1] + buffer_min,        # safe
-            all_clear[-2] + buffer_min,        # tighter
-            len(days))</code></pre>
+    all_clear = {d: max(per_table[t][d] for t in tables) for d in days}
+    # Order by CLOCK TIME, not by datetime. The worst day is the one that
+    # finished latest in the day, which is rarely the most recent date —
+    # sorting the datetimes returns whatever happened last, a wrong answer
+    # that looks entirely plausible.
+    ordered = sorted(all_clear.values(), key=lambda m: m.time())
+    safe = ordered[-1] + buffer_min
+    tighter = ordered[-2] + buffer_min if len(ordered) &gt;= 2 else safe
+    return safe, tighter, len(days)</code></pre>
+  <div class="note warn">
+    <span class="tag">Watch the midnight rollover</span>
+    <p>Adding the buffer can push the time past midnight: a 23:50 all-clear plus 15 minutes is <strong>00:05 the next day</strong>. Returning the bare clock time loses that, and <code>00:05</code> read as a same-day schedule runs roughly 24 hours early — before any dependency has refreshed. The code carries a <code>safe_next_day</code> flag and the report prints <code>(+1 day)</code> plus a warning.</p>
+  </div>
   <p><strong>Read the intersection carefully.</strong> A day only counts if every dependency refreshed on it. Days where something didn't run are excluded from the timing numbers and reported instead in the <em>missed</em> column — because a table that misses days is a reliability problem, and no schedule time fixes it.</p>
   <div class="note">
     <span class="tag">Where the two numbers come from</span>
@@ -321,8 +341,8 @@ def recommend(tables, buffer_min=15):
 <section>
   <h2><span class="num">06</span>Config and output</h2>
   <p>Three parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST).</p>
-  <p><strong>Pin the session timezone explicitly.</strong> Databricks <code>TIMESTAMP</code> renders in <code>spark.sql.session.timeZone</code>, whose default is UTC — inherit it and the same view returns different clock times on different warehouses. Set it once at the top of the job.</p>
-  <p>The report carries: the two times, the per-dependency table (refreshes / usual / worst / missed), and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, a branch that couldn't be read. When none apply, that section prints nothing.</p>
+  <p><strong>Timestamps are read as epochs, not as rendered strings.</strong> A Databricks <code>TIMESTAMP</code> renders in the warehouse's session timezone, and the Statement Execution API appends a <code>Z</code> suffix whose accuracy therefore depends on warehouse configuration this tool does not control. Selecting <code>unix_timestamp(timestamp)</code> sidesteps the question entirely — an epoch is the same instant however the session renders it. The single <code>timezone</code> parameter then decides which local day each instant falls on, which is the only place a timezone should matter.</p>
+  <p>The report carries: the two times, the per-dependency table (<code>REFRESHES / USUAL / WORST / DAYS / MISSED</code>), the day-by-day all-clear series behind those two numbers, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
 </section>
 
 <hr>
@@ -334,6 +354,24 @@ def recommend(tables, buffer_min=15):
     <li>Step 2, validated against one table per writer — ADF, Synapse Link, a Databricks job. This is the step that fails quietly.</li>
     <li>Steps 3 and 4, which are pure arithmetic and can be unit-tested with a handful of fabricated timestamps rather than real tables.</li>
   </ol>
+</section>
+
+<hr>
+
+<section>
+  <h2><span class="num">08</span>Described here but not built</h2>
+  <p>Kept in one place so no section above reads as shipped when it is not.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Not built</th><th>Consequence today</th></tr></thead>
+      <tbody>
+        <tr><td><strong>The runtime gate</strong> (<code>wait_for_deps</code> in the plan doc)</td><td>The recommendation is advisory. Nothing verifies at materialization time that dependencies actually refreshed, so nothing covers day 31.</td></tr>
+        <tr><td><strong>Concurrency and 429 backoff</strong> in the walker</td><td>The walk is serial — one REST call per object, and step 1 is the cost bottleneck. A wide dependency graph is slow, and a throttle becomes a skipped entry rather than a retry.</td></tr>
+        <tr><td><strong>Per-table retention windows</strong></td><td><code>days_history</code> is a flat cutoff for every table. A dependency with a short <code>delta.logRetentionDuration</code> reports a large <code>MISSED</code> count that looks like a reliability problem but is only a shorter history.</td></tr>
+        <tr><td><strong>A day-boundary parameter</strong></td><td>Days are calendar days in the configured timezone. A pipeline that genuinely straddles midnight cannot be re-anchored; the report flags a past-midnight start but does not model the cycle.</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 </div>

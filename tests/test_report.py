@@ -118,3 +118,70 @@ def test_degraded_disclosure_says_misses_cannot_be_detected():
     result = recommend([_hist("c.s.adf", {d: "04:00" for d in DAYS}, degraded=True)], 15)
     text = render("c.s.v", result, [], "Asia/Kolkata")
     assert "without row metrics" in text and "skipped day cannot be detected" in text
+
+
+# --- midnight rollover -------------------------------------------------------
+
+def test_a_start_time_past_midnight_is_marked_and_warned():
+    """23:50 + 15min buffer = 00:05 next day. Printing a bare 00:05 invites the
+    operator to schedule it same-day, which runs before every dependency."""
+    result = recommend([history("c.s.a", "23:50")], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "00:05 (+1 day)" in text, "the bare clock time is the dangerous reading"
+    assert "past midnight" in text
+    assert "yesterday's data" in text
+
+
+def test_an_ordinary_time_carries_no_day_marker():
+    result = recommend([history("c.s.a", "04:00")], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "(+1 day)" not in text
+    assert "past midnight" not in text
+
+
+# --- unrecognised operations -------------------------------------------------
+
+def test_unknown_operations_are_named_in_the_report():
+    h = TableHistory("c.s.a", {d: f.at(d.isoformat(), "04:00") for d in DAYS},
+                     unknown_ops=("CLUSTER BY", "REORG"))
+    result = recommend([h], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "could not classify" in text
+    assert "CLUSTER BY, REORG" in text
+
+
+def test_no_unknown_warning_when_everything_classified():
+    result = recommend([history("c.s.a")], 15)
+    assert "could not classify" not in render("c.s.v", result, [], "Asia/Kolkata")
+
+
+# --- the all-clear series ----------------------------------------------------
+
+def test_the_day_by_day_series_is_rendered():
+    """The plan's central promise: the days are on screen, not just a median and
+    a max. Without this the reader cannot check which day set safe."""
+    result = recommend([history("c.s.a", "04:00"), history("c.s.b", "03:30")], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "ALL-CLEAR BY DAY" in text
+    for day in DAYS:
+        assert day.isoformat() in text, f"{day} missing from the evidence"
+
+
+def test_the_series_names_which_days_set_the_two_numbers():
+    a = TableHistory("c.s.a", {
+        DAYS[0]: f.at(DAYS[0].isoformat(), "06:10"),   # worst
+        DAYS[1]: f.at(DAYS[1].isoformat(), "05:30"),   # second worst
+        DAYS[2]: f.at(DAYS[2].isoformat(), "04:00"),
+    })
+    text = render("c.s.v", recommend([a], 15), [], "Asia/Kolkata")
+    lines = [ln for ln in text.splitlines() if "sets safe" in ln or "sets tighter" in ln]
+    assert len(lines) == 2
+    assert DAYS[0].isoformat() in lines[0] and "06:10" in lines[0]
+    assert DAYS[1].isoformat() in lines[1] and "05:30" in lines[1]
+
+
+def test_no_series_when_there_is_no_overlapping_day():
+    a = TableHistory("c.s.a", {DAYS[0]: f.at(DAYS[0].isoformat(), "04:00")})
+    b = TableHistory("c.s.b", {DAYS[1]: f.at(DAYS[1].isoformat(), "04:00")})
+    text = render("c.s.v", recommend([a, b], 15), [], "Asia/Kolkata")
+    assert "ALL-CLEAR BY DAY" not in text

@@ -38,8 +38,11 @@ def test_read_history_parses_the_raw_sql_api_shape():
 
 def completed_projection(completions):
     """What the event_log SELECT returns after its COMPLETED filter: the noise
-    rows from mv_event_rows dropped, projected to (timestamp, state)."""
-    return [{"timestamp": r["timestamp"], "state": "COMPLETED"}
+    rows from mv_event_rows dropped, projected to the single ts_epoch column."""
+    from datetime import datetime, timezone
+    return [{"ts_epoch": str(int(datetime.strptime(
+                r["timestamp"], "%Y-%m-%dT%H:%M:%S.000Z")
+                .replace(tzinfo=timezone.utc).timestamp()))}
             for r in f.mv_event_rows(completions)
             if r["event_type"] == "update_progress" and r["state"] == "COMPLETED"]
 

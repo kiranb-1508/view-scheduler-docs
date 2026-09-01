@@ -108,3 +108,29 @@ def test_degraded_flag_survives_into_the_row():
     flagged = history("adf_fed", ["04:00"] * 5, degraded=True)
     result = recommend([flagged], buffer_min=15)
     assert result.rows[0].degraded
+
+
+# --- midnight rollover -------------------------------------------------------
+
+def test_buffer_crossing_midnight_is_flagged_not_silently_wrapped():
+    """A 23:50 all-clear plus a 15-minute buffer is 00:05 the NEXT day. The bare
+    clock time reads as ~24h earlier, which is the dangerous direction: an
+    operator scheduling 00:05 same-day runs before every dependency."""
+    late = history("late", ["23:50"] * 5)
+    result = recommend([late], buffer_min=15)
+    assert result.safe == time(0, 5)
+    assert result.safe_next_day, "the rollover must be reported, not discarded"
+
+
+def test_a_normal_time_is_not_marked_next_day():
+    result = recommend([ORDERS, CUSTOMERS], buffer_min=15)
+    assert result.safe == time(6, 25)
+    assert not result.safe_next_day and not result.tighter_next_day
+
+
+def test_only_the_wrapping_number_is_marked():
+    """safe wraps, tighter does not — the flags are independent."""
+    a = history("a", ["23:50", "20:00", "20:00", "20:00", "20:00"])
+    result = recommend([a], buffer_min=15)
+    assert result.safe == time(0, 5) and result.safe_next_day
+    assert result.tighter == time(20, 15) and not result.tighter_next_day

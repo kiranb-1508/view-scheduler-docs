@@ -26,7 +26,7 @@ def from_raw(row: dict) -> Commit:
     """Convert a raw SQL-API row exactly as the production reader does."""
     return Commit(
         version=int(row["version"]),
-        timestamp=datetime.strptime(row["timestamp"], "%Y-%m-%dT%H:%M:%S.000Z").replace(tzinfo=UTC),
+        timestamp=datetime.fromtimestamp(int(row["ts_epoch"]), tz=UTC),
         operation=row["operation"],
         params=parse_json_field(row["operationParameters"]) or {},
         metrics=parse_json_field(row["operationMetrics"]),
@@ -156,3 +156,34 @@ def test_looks_continuous_false_for_once_a_day():
     commits = [commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
                       f.at(f"2026-08-0{d}", "04:00"), version=d) for d in (1, 2, 3)]
     assert not looks_continuous(commits, date(2026, 8, 6), 30, UTC)
+
+
+# --- unrecognised operations -------------------------------------------------
+
+def test_an_unrecognised_operation_is_not_silently_treated_as_maintenance():
+    """An operation in none of the three sets is 'unknown', not 'ignore'. Both
+    verdicts decline to count it, but only one can be reported."""
+    from scheduler.history import UNKNOWN_CLASS, classify
+    assert classify(commit("REORG")) == UNKNOWN_CLASS
+    assert classify(commit("OPTIMIZE")) == "ignore"
+    assert not qualifying(commit("REORG")), "still conservative — it does not count"
+
+
+def test_unknown_operations_are_collected_by_name():
+    from scheduler.history import unknown_operations
+    commits = [commit("REORG"), commit("CLUSTER BY"), commit("REORG"),
+               commit("OPTIMIZE"), commit("WRITE", {"mode": "Append"})]
+    assert unknown_operations(commits) == ("CLUSTER BY", "REORG")
+
+
+def test_summarize_carries_unknown_operations():
+    commits = [commit("REORG", {}, {}, f.at("2026-08-06", "03:00")),
+               commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "04:00"))]
+    summary = summarize("c.s.t", commits, date(2026, 8, 6), 30, UTC)
+    assert summary.unknown_ops == ("REORG",)
+    assert len(summary.finish_times) == 1, "the recognised write still counts"
+
+
+def test_no_unknown_operations_on_a_clean_table():
+    commits = [commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "04:00"))]
+    assert summarize("c.s.t", commits, date(2026, 8, 6), 30, UTC).unknown_ops == ()

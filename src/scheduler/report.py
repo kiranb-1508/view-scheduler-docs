@@ -5,11 +5,15 @@ from __future__ import annotations
 from typing import Sequence
 
 from .models import Skipped
-from .recommend import Recommendation
+from .recommend import WEEKDAYS, Recommendation
 
 
 def _hhmm(value) -> str:
     return value.strftime("%H:%M") if value else "—"
+
+
+def _day_mark(next_day: bool) -> str:
+    return " (+1 day)" if next_day else ""
 
 
 def _plural(n: int, word: str) -> str:
@@ -30,10 +34,11 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
     lines.append("")
 
     if result.safe:
-        lines.append(f"       START AT {_hhmm(result.safe)}   safe — later than "
-                     f"all {_plural(result.n_days, 'day')}")
+        lines.append(f"       START AT {_hhmm(result.safe)}{_day_mark(result.safe_next_day)}"
+                     f"   safe — later than all {_plural(result.n_days, 'day')}")
         if result.tighter and result.tighter != result.safe:
-            lines.append(f"       or       {_hhmm(result.tighter)}   tighter — "
+            lines.append(f"       or       {_hhmm(result.tighter)}"
+                         f"{_day_mark(result.tighter_next_day)}   tighter — "
                          f"would have been early on 1 day in {result.n_days}")
     else:
         lines.append("       NO RECOMMENDATION — no day in the window had every "
@@ -51,11 +56,35 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
                 f"{row.name:<{width}}{row.refreshes:<{rw}}{_hhmm(row.usual):<8}"
                 f"{_hhmm(row.worst):<8}{row.observed_days:<6}{row.missed}")
 
+    series = _all_clear_series(result)
+    if series:
+        lines.append("")
+        lines.extend(series)
+
     warnings = _warnings(result, skipped)
     if warnings:
         lines.append("")
         lines.extend(warnings)
     return "\n".join(lines)
+
+
+def _all_clear_series(result: Recommendation) -> list[str]:
+    """The day-by-day all-clear times, latest first.
+
+    This is the evidence behind the two numbers: which day set `safe`, how far
+    the rest sit below it, and whether the worst day is an outlier or the norm.
+    Without it a reader has only a median and a max and no way to check either.
+    """
+    if not result.all_clear:
+        return []
+    ordered = sorted(result.all_clear.items(), key=lambda kv: kv[1].time(),
+                     reverse=True)
+    out = ["ALL-CLEAR BY DAY   (when the last dependency finished; latest first)"]
+    for i, (day, moment) in enumerate(ordered):
+        mark = "  ← sets safe" if i == 0 else ("  ← sets tighter" if i == 1 else "")
+        out.append(f"  {day.isoformat()}  {WEEKDAYS[day.weekday()]}  "
+                   f"{moment.strftime('%H:%M')}{mark}")
+    return out
 
 
 def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
@@ -85,6 +114,16 @@ def _warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
         if row.refreshes == "never":
             out.append(f"!  {row.name} has no qualifying refresh in the window "
                        f"— it may be dormant, or written by a path we cannot read")
+        if row.unknown_ops:
+            out.append(f"!  {row.name} has commits we could not classify "
+                       f"({', '.join(row.unknown_ops)}) — they were not counted as "
+                       f"refreshes, so its time may be later than the truth")
+
+    if result.safe_next_day:
+        out.append(f"!  the buffer pushes the start past midnight — {_hhmm(result.safe)} "
+                   f"means the NEXT calendar day, after that day's dependencies have "
+                   f"run. Scheduling {_hhmm(result.safe)} as a same-day time would "
+                   f"run before every dependency, on yesterday's data")
 
     if skipped:
         out.append(f"!  {len(skipped)} dependenc"

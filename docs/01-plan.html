@@ -42,19 +42,27 @@ td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
        START AT 05:45   safe — later than all 30 days
        or       05:20   tighter — would have been early on 1 day in 30
 
-DEPENDENCY            REFRESHES   USUAL   WORST   MISSED
-bronze.orders         daily       04:12   05:30   0
-bronze.customers      daily       03:50   04:05   0
-bronze.payments       daily       04:40   05:28   0
-silver.fx_rates       daily       02:15   02:40   2
-silver.products       Mondays     06:20   06:45   0
-silver.geo            daily       03:05   03:22   0
-gold.segments         daily       05:01   05:31   0
-gold.ltv              daily       04:55   05:12   0
+DEPENDENCY          REFRESHES  USUAL   WORST   DAYS  MISSED
+bronze.orders       daily      04:12   05:30   30    0
+bronze.customers    daily      03:50   04:05   30    0
+bronze.payments     daily      04:40   05:28   30    0
+silver.fx_rates     daily      02:15   02:40   28    2
+silver.products     Mons       06:20   06:45   4     0
+silver.geo          daily      03:05   03:22   30    0
+gold.segments       daily      05:01   05:31   30    0
+gold.ltv            daily      04:55   05:12   30    0
 
-!  silver.products refreshes Mondays only → use 07:00 on Mondays
-!  silver.fx_rates missed 2 of 30 days — no schedule time fixes that
-!  1 table skipped: ext.crm_sync is not Delta, can't read its history</code></pre>
+ALL-CLEAR BY DAY   (when the last dependency finished; latest first)
+  2026-08-17  Mon  06:45  ← sets safe
+  2026-08-24  Mon  06:20  ← sets tighter
+  2026-08-10  Mon  06:05
+  2026-08-06  Thu  05:31
+  ... 26 more
+
+!  silver.fx_rates missed 2 of 30 observed days — no schedule time fixes that
+!  silver.products refreshes Mons only → it will not be fresh on other days
+!  1 dependency skipped:
+     ext.crm_sync — not readable as a Delta table (type FOREIGN)</code></pre>
   </div>
   <p>No confidence tiers, no coverage percentages, no vocabulary anyone has to learn. <strong>"Worst day in 30"</strong> and <strong>"worst but one"</strong> are the same two order statistics from v3 — just said in words a person already knows.</p>
   <p>The weekly table isn't a classifier output buried in a report. It's a row saying <code>Mondays</code>, which anyone reads in half a second.</p>
@@ -64,7 +72,12 @@ gold.ltv              daily       04:55   05:12   0
 
 <section>
   <h2>The gate — 15 lines that replace most of the spec</h2>
-  <p>Drop this at the top of the materialization job. It checks instead of predicting.</p>
+  <div class="note warn">
+    <span class="tag">Not built — proposal only</span>
+    <p><strong>This section describes work that does not exist.</strong> No gate ships in <code>src/scheduler/</code>, which is an analysis-only, read-only package: it reads history and prints a recommendation, and nothing in it runs at materialization time or blocks a job. The code below is a sketch of what a gate would look like if someone built one, in whatever orchestrator actually runs the materialization.</p>
+    <p>Until then, treat the recommendation as <strong>advisory</strong>. Nothing checks at runtime that dependencies really refreshed, so nothing covers day 31 — see <em>Honest limits</em>.</p>
+  </div>
+  <p>The idea: drop this at the top of the materialization job, so it checks instead of predicting.</p>
   <pre><code>def wait_for_deps(tables, timeout_min=90):
     deadline = time.time() + timeout_min * 60
     while True:
@@ -81,7 +94,7 @@ def refreshed_today(t):
     return row.timestamp.date() == date.today() and wrote_rows(row)</code></pre>
   <div class="note good">
     <span class="tag">Why this is the real fix</span>
-    <p>With the gate, a wrong recommendation costs five minutes of waiting. Without it, a wrong recommendation silently publishes yesterday's numbers to a report. That difference is why the gate is worth more than every statistical refinement in v3 combined — and it's shorter than any one of them.</p>
+    <p>With a gate, a wrong recommendation costs five minutes of waiting. Without one — which is where things stand — a wrong recommendation silently publishes yesterday's numbers to a report. That difference is why a gate would be worth more than every statistical refinement in v3 combined, and it is why the analyzer keeps its outlier and continuous-refresh warnings in the meantime: those exist precisely because nothing catches a bad number at runtime.</p>
   </div>
   <p>It also deletes the nastiest bug we found: late runs bleeding into the next day and dragging the recommendation <em>earlier</em>. The gate doesn't care what day a commit was attributed to. It asks whether the table refreshed, now.</p>
 </section>
@@ -112,7 +125,7 @@ def refreshed_today(t):
         <tr><td class="cut">Cycle attribution + cutover detection</td><td>Calendar day</td><td>A pipeline genuinely straddles midnight — then set the day boundary by hand</td></tr>
         <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "worst but one"</td><td>You have 100+ days of history, which you won't for a year</td></tr>
         <tr><td class="cut">Changepoint detection</td><td>The 30 days are on screen</td><td>You automate the check and no human reads the output</td></tr>
-        <tr><td class="cut">Tolerance bands, outlier rules</td><td>The gate</td><td>Never, once the gate exists</td></tr>
+        <tr><td class="cut">Tolerance bands, outlier rules</td><td><em>Nothing — this row was wrong.</em> The gate it named was never built, so the analyzer kept a robust (MAD) outlier check that names the day pinning <code>safe</code></td><td>Already back</td></tr>
         <tr><td class="cut">Timing/reliability split</td><td>A "missed" column</td><td>Never</td></tr>
         <tr><td class="cut">18-item blind spot register</td><td>Only what applies, usually 0–3 lines</td><td>Never — the other 15 were noise on any given run</td></tr>
         <tr><td class="cut">10 of 13 parameters</td><td>3</td><td>Someone asks for one</td></tr>
@@ -132,7 +145,7 @@ def refreshed_today(t):
   <p>Two you should say out loud when handing this over, because they're properties of the approach and not bugs to fix later.</p>
   <ul>
     <li><strong>It proves pipelines finished, not that data is correct.</strong> Late-arriving records aren't visible in commit history to anyone, by any method.</li>
-    <li><strong>30 days is 30 days.</strong> "Worst of 30" is a real, useful number, but it is not a guarantee about day 31. The gate is what covers day 31.</li>
+    <li><strong>30 days is 30 days.</strong> "Worst of 30" is a real, useful number, but it is not a guarantee about day 31. <strong>Nothing currently covers day 31</strong> — the gate that would is not built. The recommendation is advisory: if a dependency runs later than it ever has, the job starts anyway and publishes stale data.</li>
   </ul>
   <p>The detailed v3 spec stays useful as an appendix — it holds eight rounds of edge cases worth consulting when something behaves oddly. Just don't build from it.</p>
 </section>

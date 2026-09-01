@@ -38,10 +38,15 @@ IGNORE = {
 FULL_REPLACE_CLASS = "full_replace"
 INCREMENTAL_CLASS = "incremental"
 IGNORE_CLASS = "ignore"
+#: An operation name in none of the sets above. Not counted as a refresh (the
+#: conservative choice), but named in the report rather than silently dropped —
+#: Delta adds operation names over time, and a dropped early write pushes the
+#: finish time later with no signal that anything was missed.
+UNKNOWN_CLASS = "unknown"
 
 
 def classify(commit: Commit) -> str:
-    """Which of the three classes this commit falls into."""
+    """Which class this commit falls into: full_replace, incremental, ignore, unknown."""
     operation = (commit.operation or "").upper()
     mode = (commit.params or {}).get("mode")
 
@@ -57,7 +62,15 @@ def classify(commit: Commit) -> str:
         return INCREMENTAL_CLASS
     if operation == "MV REFRESH":
         return FULL_REPLACE_CLASS
-    return IGNORE_CLASS
+    return UNKNOWN_CLASS
+
+
+def unknown_operations(commits: Iterable[Commit]) -> tuple[str, ...]:
+    """Operation names we did not recognise, in stable order."""
+    return tuple(sorted({
+        (c.operation or "").upper() for c in commits
+        if classify(c) == UNKNOWN_CLASS
+    }))
 
 
 def has_metrics(commit: Commit) -> bool:
@@ -66,8 +79,12 @@ def has_metrics(commit: Commit) -> bool:
 
 
 def qualifying(commit: Commit) -> bool:
-    """Any write (full replace or incremental, including 0-row) counts as a refresh."""
-    return classify(commit) != IGNORE_CLASS
+    """Any write (full replace or incremental, including 0-row) counts as a refresh.
+
+    An unrecognised operation does not count — the same conservative verdict as
+    maintenance, but `unknown_operations` names it so the silence is broken.
+    """
+    return classify(commit) in (FULL_REPLACE_CLASS, INCREMENTAL_CLASS)
 
 
 def is_degraded(commits: Iterable[Commit]) -> bool:
@@ -124,4 +141,5 @@ def summarize(name: str, commits: list[Commit], today: date, days: int,
         finish_times=finish_times(commits, today, days, tz),
         metrics_degraded=is_degraded(commits),
         continuous=looks_continuous(commits, today, days, tz),
+        unknown_ops=unknown_operations(commits),
     )

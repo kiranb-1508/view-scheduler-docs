@@ -71,10 +71,15 @@ def raw_history_row(
     params: dict | None = None,
     metrics: dict | None = None,
 ) -> dict[str, Any]:
-    """A row as the SQL Statement API returns it: nested fields JSON-encoded."""
+    """A row as the SQL Statement API returns it: nested fields JSON-encoded.
+
+    The reader selects `unix_timestamp(timestamp) AS ts_epoch` rather than the
+    rendered timestamp string, so that is the column modelled here — an epoch is
+    the same instant whatever the warehouse's session timezone renders.
+    """
     return {
         "version": str(version),
-        "timestamp": ts.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "ts_epoch": str(int(ts.astimezone(UTC).timestamp())),
         "operation": operation,
         "operationParameters": json.dumps(params) if params is not None else None,
         "operationMetrics": json.dumps(metrics) if metrics is not None else None,

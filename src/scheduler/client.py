@@ -72,21 +72,31 @@ def parse_json_field(value: Any) -> dict | None:
 
 # --- history readers ---------------------------------------------------------
 
-def _parse_ts(value: str):
+def _from_epoch(value):
+    """Seconds since the epoch → an aware UTC datetime.
+
+    Timestamps are read as epochs rather than as the API's rendered string
+    because a Spark TIMESTAMP is an instant, and `unix_timestamp` returns that
+    instant regardless of the warehouse's session timezone. The rendered string
+    carries a "Z" suffix whose accuracy depends on that session setting, which
+    is warehouse configuration this tool does not control. Verified identical to
+    the string path on a UTC warehouse; correct on any other.
+    """
     from datetime import datetime, timezone
-    text = (value or "").replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(text)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return datetime.fromtimestamp(int(value), tz=timezone.utc)
 
 
 def read_history(ws: "Workspace", table: str) -> list:
     """DESCRIBE HISTORY for a physical Delta table."""
     from .models import Commit
-    rows = ws.sql(f"DESCRIBE HISTORY {table}", target=table)
+    rows = ws.sql(
+        "SELECT version, unix_timestamp(timestamp) AS ts_epoch, operation, "
+        f"operationParameters, operationMetrics FROM (DESCRIBE HISTORY {table})",
+        target=table)
     return [
         Commit(
             version=int(r.get("version") or 0),
-            timestamp=_parse_ts(r["timestamp"]),
+            timestamp=_from_epoch(r["ts_epoch"]),
             operation=r.get("operation") or "",
             params=parse_json_field(r.get("operationParameters")) or {},
             metrics=parse_json_field(r.get("operationMetrics")),
@@ -99,15 +109,14 @@ def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
     """Read completed MV refreshes from the pipeline event log (DESCRIBE HISTORY is rejected on MVs)."""
     from .models import Commit
     statement = (
-        "SELECT timestamp, "
-        "get_json_object(details, '$.update_progress.state') AS state "
+        "SELECT unix_timestamp(timestamp) AS ts_epoch "
         f"FROM event_log(TABLE({mv})) "
         "WHERE event_type = 'update_progress' "
         "AND get_json_object(details, '$.update_progress.state') = 'COMPLETED'"
     )
     rows = ws.sql(statement, target=mv)
     return [
-        Commit(version=i, timestamp=_parse_ts(r["timestamp"]),
+        Commit(version=i, timestamp=_from_epoch(r["ts_epoch"]),
                operation="MV REFRESH", params={}, metrics=None)
         for i, r in enumerate(rows)
     ]
