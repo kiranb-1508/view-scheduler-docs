@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library Flow - View Materialization Scheduler</title>
+<style>
+:root {
+  --paper: #f4f6f8;
+  --surface: #fff;
+  --ink: #12202e;
+  --soft: #3d4e5c;
+  --muted: #697a88;
+  --rule: #cfd8df;
+  --accent: #1e6f8c;
+  --accent-soft: #dceaf0;
+  --good: #2f6b4f;
+  --good-soft: #deede4;
+  --warn: #a87a16;
+  --warn-soft: #f5ebd6;
+  --crit: #b3324a;
+  --crit-soft: #f7dfe4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0e1519;
+    --surface: #151e24;
+    --ink: #dce5ea;
+    --soft: #a9b9c4;
+    --muted: #7e8f9b;
+    --rule: #2a3841;
+    --accent: #59aec9;
+    --accent-soft: #12303c;
+    --good: #6fbe95;
+    --good-soft: #12301f;
+    --warn: #d6a94a;
+    --warn-soft: #33280f;
+    --crit: #e2788b;
+    --crit-soft: #3a1a22;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.55;
+}
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 26px 90px; }
+header { border-bottom: 2px solid var(--ink); padding: 54px 0 24px; }
+.eyebrow, .label, code, .diagram text, .function {
+  font-family: "Courier New", monospace;
+}
+.eyebrow {
+  margin: 0 0 14px;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+h1, h2, h3 { font-family: Arial, sans-serif; line-height: 1.12; }
+h1 { font-size: clamp(2rem, 5vw, 3.25rem); letter-spacing: -.03em; margin: 0 0 12px; }
+h2 { font-size: 1.55rem; margin: 42px 0 10px; }
+h3 { font-size: 1.05rem; margin: 26px 0 7px; }
+.lead { max-width: 70ch; color: var(--soft); font-size: 1.1rem; margin: 0; }
+.note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 14px 18px; margin: 24px 0; }
+.note p:last-child { margin-bottom: 0; }
+.label { color: var(--accent); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+.diagram-shell { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); padding: 18px; margin: 24px 0 12px; }
+.diagram { display: block; min-width: 950px; width: 100%; height: auto; }
+.caption { color: var(--muted); font-family: "Courier New", monospace; font-size: 12px; margin: 10px 0 0; }
+code { background: color-mix(in srgb, var(--rule) 45%, transparent); padding: 1px 5px; font-size: .86em; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.card { border: 1px solid var(--rule); background: var(--surface); padding: 16px; }
+.card h3 { margin-top: 0; }
+.card p { margin: 0; color: var(--soft); }
+.card.accent { border-top: 3px solid var(--accent); }
+.card.good { border-top: 3px solid var(--good); }
+.card.warn { border-top: 3px solid var(--warn); }
+table { border-collapse: collapse; width: 100%; background: var(--surface); font-size: 14px; }
+th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); padding: 10px 12px; }
+th { color: var(--muted); font-family: Arial, sans-serif; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+tbody tr:last-child td { border-bottom: 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--rule); }
+.function { color: var(--accent); font-size: .9em; white-space: nowrap; }
+ul { padding-left: 22px; }
+li { margin-bottom: 6px; }
+@media (max-width: 720px) {
+  .wrap { padding-left: 18px; padding-right: 18px; }
+  .grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <p class="eyebrow">Visual implementation guide</p>
+    <h1>From view name to schedule time</h1>
+    <p class="lead">This is the complete flow of the proposed library. Read it from top to bottom. Blue boxes do I/O, gray boxes do pure computation, and red branches become visible warnings instead of disappearing.</p>
+  </header>
+
+  <div class="note">
+    <span class="label">Important boundary</span>
+    <p>The library is read-only. It does not wait for dependencies, write tables, parse SQL, or modify the workspace. It answers from metadata and table history only.</p>
+  </div>
+
+  <section>
+    <h2>1. The complete flow</h2>
+    <div class="diagram-shell">
+      <svg class="diagram" viewBox="0 0 1120 1740" role="img" aria-labelledby="diagram-title diagram-desc">
+        <title id="diagram-title">View materialization scheduler library flow</title>
+        <desc id="diagram-desc">A top-to-bottom flow from a view name and configuration through dependency walking, history reading, commit classification, daily readiness, recommendation, and report rendering. Error and warning branches are shown on the side.</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#697a88" />
+          </marker>
+          <marker id="blue-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#1e6f8c" />
+          </marker>
+        </defs>
+
+        <style>
+          .box { fill: #ffffff; stroke: #697a88; stroke-width: 2; }
+          .io { fill: #dceaf0; stroke: #1e6f8c; stroke-width: 2; }
+          .good { fill: #deede4; stroke: #2f6b4f; stroke-width: 2; }
+          .warn { fill: #f5ebd6; stroke: #a87a16; stroke-width: 2; }
+          .bad { fill: #f7dfe4; stroke: #b3324a; stroke-width: 2; }
+          .decision { fill: #fff; stroke: #697a88; stroke-width: 2; }
+          .title { font: 700 18px Arial, sans-serif; fill: #12202e; }
+          .body { font: 15px Arial, sans-serif; fill: #12202e; }
+          .small { font: 13px "Courier New", monospace; fill: #3d4e5c; }
+          .white-body { font: 15px Arial, sans-serif; fill: #12202e; }
+          .line { fill: none; stroke: #697a88; stroke-width: 2; marker-end: url(#arrow); }
+          .blue-line { fill: none; stroke: #1e6f8c; stroke-width: 2; marker-end: url(#blue-arrow); }
+          .dashed { fill: none; stroke: #a87a16; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+          .side { font: 13px "Courier New", monospace; fill: #697a88; }
+        </style>
+
+        <!-- Main path -->
+        <rect class="io" x="350" y="24" width="420" height="84" rx="5" />
+        <text class="title" x="560" y="57" text-anchor="middle">INPUT</text>
+        <text class="body" x="560" y="81" text-anchor="middle">view_fqn + Config + today</text>
+        <text class="small" x="560" y="99" text-anchor="middle">days_history=30, buffer_min=15, timezone</text>
+
+        <path class="blue-line" d="M560 108 L560 146" />
+        <rect class="box" x="280" y="146" width="560" height="86" rx="5" />
+        <text class="title" x="560" y="181" text-anchor="middle">analyze(...)</text>
+        <text class="body" x="560" y="206" text-anchor="middle">orchestrates the run; injects fetch_meta and fetch_history</text>
+        <text class="small" x="560" y="224" text-anchor="middle">no Spark or network inside the pure functions</text>
+
+        <path class="line" d="M560 232 L560 274" />
+        <rect class="io" x="300" y="274" width="520" height="88" rx="5" />
+        <text class="title" x="560" y="309" text-anchor="middle">walk(view_fqn, fetch_meta)</text>
+        <text class="body" x="560" y="334" text-anchor="middle">GET UC table metadata, then recurse through VIEW dependencies</text>
+        <text class="small" x="560" y="352" text-anchor="middle">memo + active set + depth cap 60</text>
+
+        <path class="line" d="M560 362 L560 402" />
+        <polygon class="decision" points="560,402 720,462 560,522 400,462" />
+        <text class="title" x="560" y="458" text-anchor="middle">table_type?</text>
+
+        <path class="blue-line" d="M400 462 L190 462 L190 548" />
+        <text class="side" x="285" y="451" text-anchor="middle">VIEW</text>
+        <rect class="io" x="44" y="548" width="292" height="106" rx="5" />
+        <text class="title" x="190" y="582" text-anchor="middle">recurse</text>
+        <text class="body" x="190" y="608" text-anchor="middle">for each dependency</text>
+        <text class="small" x="190" y="632" text-anchor="middle">table_full_name -> walk(child)</text>
+        <path class="blue-line" d="M190 548 C190 400 280 316 300 316" />
+
+        <path class="line" d="M560 522 L560 548" />
+        <text class="side" x="610" y="538">MANAGED / EXTERNAL / MV</text>
+        <rect class="box" x="410" y="548" width="300" height="106" rx="5" />
+        <text class="title" x="560" y="582" text-anchor="middle">terminal gating table</text>
+        <text class="body" x="560" y="608" text-anchor="middle">add to batch table list</text>
+        <text class="small" x="560" y="632" text-anchor="middle">history will be read later</text>
+
+        <path class="line" d="M720 462 L930 462 L930 548" />
+        <text class="side" x="830" y="451" text-anchor="middle">FOREIGN / HMS / function / error</text>
+        <rect class="bad" x="784" y="548" width="292" height="106" rx="5" />
+        <text class="title" x="930" y="582" text-anchor="middle">skipped list</text>
+        <text class="body" x="930" y="608" text-anchor="middle">name + reason</text>
+        <text class="small" x="930" y="632" text-anchor="middle">never silently dropped</text>
+
+        <rect class="warn" x="44" y="688" width="292" height="96" rx="5" />
+        <text class="title" x="190" y="722" text-anchor="middle">cycle / depth guard</text>
+        <text class="body" x="190" y="748" text-anchor="middle">append skipped reason</text>
+        <text class="small" x="190" y="768" text-anchor="middle">walk continues</text>
+        <path class="dashed" d="M44 600 L24 600 L24 736 L44 736" />
+
+        <rect class="warn" x="784" y="688" width="292" height="96" rx="5" />
+        <text class="title" x="930" y="722" text-anchor="middle">STREAMING_TABLE</text>
+        <text class="body" x="930" y="748" text-anchor="middle">separate continuous list</text>
+        <text class="small" x="930" y="768" text-anchor="middle">do not use first commit of day</text>
+        <path class="dashed" d="M710 600 L760 600 L760 736 L784 736" />
+
+        <path class="line" d="M560 654 L560 830" />
+        <rect class="io" x="300" y="830" width="520" height="92" rx="5" />
+        <text class="title" x="560" y="865" text-anchor="middle">fetch_history(table)</text>
+        <text class="body" x="560" y="890" text-anchor="middle">DESCRIBE HISTORY once per terminal table</text>
+        <text class="small" x="560" y="910" text-anchor="middle">per-table errors become skipped entries</text>
+
+        <path class="line" d="M560 922 L560 962" />
+        <rect class="box" x="300" y="962" width="520" height="98" rx="5" />
+        <text class="title" x="560" y="997" text-anchor="middle">classify(row)</text>
+        <text class="body" x="560" y="1022" text-anchor="middle">operation + operationParameters.mode + metrics</text>
+        <text class="small" x="560" y="1044" text-anchor="middle">convert timestamps to local clock minutes</text>
+
+        <path class="line" d="M300 1011 L180 1011 L180 1088" />
+        <text class="side" x="239" y="1000" text-anchor="middle">full replace</text>
+        <rect class="good" x="44" y="1088" width="272" height="110" rx="5" />
+        <text class="title" x="180" y="1122" text-anchor="middle">qualifying finish</text>
+        <text class="body" x="180" y="1148" text-anchor="middle">Overwrite / CTAS</text>
+        <text class="small" x="180" y="1174" text-anchor="middle">qualifies even at 0 rows</text>
+
+        <path class="line" d="M560 1060 L560 1088" />
+        <text class="side" x="590" y="1078">incremental</text>
+        <rect class="good" x="424" y="1088" width="272" height="110" rx="5" />
+        <text class="title" x="560" y="1122" text-anchor="middle">qualifying finish</text>
+        <text class="body" x="560" y="1148" text-anchor="middle">Append / MERGE / UPDATE</text>
+        <text class="small" x="560" y="1174" text-anchor="middle">rows &gt; 0, or empty metrics</text>
+
+        <path class="line" d="M820 1011 L940 1011 L940 1088" />
+        <text class="side" x="880" y="1000" text-anchor="middle">ignore / ran-empty</text>
+        <rect class="warn" x="804" y="1088" width="272" height="110" rx="5" />
+        <text class="title" x="940" y="1122" text-anchor="middle">status flags</text>
+        <text class="body" x="940" y="1148" text-anchor="middle">OPTIMIZE / DELETE / 0 rows</text>
+        <text class="small" x="940" y="1174" text-anchor="middle">keep warning; do not invent finish</text>
+
+        <path class="line" d="M560 1198 L560 1240" />
+        <rect class="box" x="300" y="1240" width="520" height="100" rx="5" />
+        <text class="title" x="560" y="1275" text-anchor="middle">finish_times(table)</text>
+        <text class="body" x="560" y="1300" text-anchor="middle">first qualifying commit per local calendar day</text>
+        <text class="small" x="560" y="1322" text-anchor="middle">output: date -> minutes since midnight</text>
+
+        <path class="line" d="M560 1340 L560 1380" />
+        <rect class="box" x="270" y="1380" width="580" height="118" rx="5" />
+        <text class="title" x="560" y="1415" text-anchor="middle">recommend(...)</text>
+        <text class="body" x="560" y="1440" text-anchor="middle">evaluate each date in the requested window</text>
+        <text class="small" x="560" y="1464" text-anchor="middle">today finish -> use time; earlier refresh -> stale-ready=0</text>
+        <text class="small" x="560" y="1483" text-anchor="middle">never refreshed -> blocked day; all-clear=max table times</text>
+
+        <path class="line" d="M560 1498 L560 1538" />
+        <rect class="good" x="270" y="1538" width="580" height="104" rx="5" />
+        <text class="title" x="560" y="1573" text-anchor="middle">schedule results</text>
+        <text class="body" x="560" y="1598" text-anchor="middle">safe = worst all-clear + buffer</text>
+        <text class="body" x="560" y="1620" text-anchor="middle">sooner = second-worst + buffer; per-weekday times</text>
+
+        <path class="line" d="M560 1642 L560 1682" />
+        <rect class="good" x="270" y="1682" width="580" height="40" rx="5" />
+        <text class="title" x="560" y="1708" text-anchor="middle">render(report) -> human-readable output</text>
+      </svg>
+    </div>
+    <p class="caption">The main path is vertical. Side branches are not failures of the whole run: they become named evidence or warnings in the final report.</p>
+  </section>
+
+  <section>
+    <h2>2. What each function receives and returns</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Function</th><th>Input</th><th>Output</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="function">analyze</td><td>view name, config, injected I/O</td><td>report data</td><td>Runs the pipeline in order.</td></tr>
+          <tr><td class="function">walk</td><td>FQN + <code>fetch_meta</code></td><td>gating tables + skipped list</td><td>Finds terminal dependencies without parsing SQL.</td></tr>
+          <tr><td class="function">fetch_history</td><td>table FQN</td><td>raw history rows</td><td>Reads Delta history; never writes data.</td></tr>
+          <tr><td class="function">classify</td><td>one history row</td><td>status + flags</td><td>Decides whether the row represents a usable refresh.</td></tr>
+          <tr><td class="function">finish_times</td><td>history rows + timezone</td><td><code>{date: minute}</code></td><td>Chooses the first qualifying finish each local day.</td></tr>
+          <tr><td class="function">recommend</td><td>per-table finish maps</td><td>safe, sooner, weekday times</td><td>Combines dependencies and exposes risk.</td></tr>
+          <tr><td class="function">render</td><td>report data</td><td>text/HTML report</td><td>Shows the answer, evidence, and only applicable warnings.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. The important decisions in plain language</h2>
+    <div class="grid">
+      <article class="card accent">
+        <h3>Dependency discovery</h3>
+        <p>Views are opened recursively through the UC API. Physical tables become inputs to history analysis. Unknown or unreadable dependencies remain visible in <code>skipped</code>.</p>
+      </article>
+      <article class="card good">
+        <h3>Refresh classification</h3>
+        <p><code>WRITE</code> is not enough. The code checks <code>operationParameters.mode</code>. Full replacements qualify even when they write zero rows.</p>
+      </article>
+      <article class="card warn">
+        <h3>No runtime gate</h3>
+        <p>The library never waits. A missed refresh becomes evidence, while <code>safe</code> and <code>sooner</code> show the cost of choosing an earlier time.</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. How the outlier case appears</h2>
+    <div class="note">
+      <p>A table normally finishes at 07:00 but finishes at 08:00 once:</p>
+      <ul>
+        <li><strong>safe:</strong> 08:15, because it covers the observed worst day;</li>
+        <li><strong>sooner:</strong> approximately 07:15, because it excludes the single worst day;</li>
+        <li><strong>evidence:</strong> the report names the date, table, usual time, worst time, and the one-day risk.</li>
+      </ul>
+      <p>The library does not silently delete the 08:00 incident. It lets the operator decide whether that incident should permanently influence the schedule.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Final report shape</h2>
+    <pre><code>VIEW   sales_gold.customer_360
+  </section>
+</main>
+</body>
+</html>
