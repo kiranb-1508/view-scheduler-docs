@@ -10,6 +10,8 @@ Open the HTML files in a browser.
 | [docs/01-plan.html](docs/01-plan.html) | The plan. Start here — output shape, what's built, what was deliberately cut |
 | [docs/02-scheduler-design.html](docs/02-scheduler-design.html) | Scheduler design: architecture, code flow, four steps, worked example |
 | [docs/03-impact-design.html](docs/03-impact-design.html) | Impact analysis: given a table, what depends on it. Separate tool, separate data source |
+| [docs/04-library-flow.html](docs/04-library-flow.html) | Visual end-to-end flow: input, functions, branches, recommendation, and report |
+| [V2/README.md](V2/README.md) | Scaffold for the simpler V2 library implementation |
 | [GENIE-PROMPT.md](GENIE-PROMPT.md) | Build prompt for Databricks Genie Code, phased with verification gates |
 
 ## The two things most likely to bite
