@@ -3,6 +3,9 @@
 Answers: *given a Unity Catalog view, what is the earliest time each day its
 materialization can be scheduled so every dependency has refreshed?*
 
+Two questions, two tools. `analyze` answers **when** to schedule, from history.
+The gate, `can_refresh`, answers **whether** a view can refresh right now.
+
 ```
 $ view-scheduler sales_gold.customer_360
 
@@ -15,10 +18,11 @@ VIEW   sales_gold.customer_360
 
 ## Read this before you rely on it
 
-**The recommendation is advisory.** Nothing verifies at runtime that
-dependencies actually refreshed. If a dependency runs later than it ever has,
-the job starts anyway and publishes stale data, silently. The runtime gate
-described in `docs/01-plan.html` is a *proposal* — it was never built.
+**The recommendation is advisory.** It says when a view *usually* can run; it
+does not check today. If a dependency runs later than it ever has, the job
+starts anyway and publishes stale data, silently. Pair it with the gate —
+`can_refresh` — which checks every dependency's actual last write before the
+refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
@@ -97,8 +101,42 @@ print(text)
 anything that could not be read. Nothing is ever dropped silently — an
 unreadable dependency comes back in `skipped` with a reason.
 
-Three settings, and there is a standing rule to ask before adding a fourth:
-`days_history` (30), `buffer_min` (15), `timezone` (`Asia/Kolkata`).
+Four settings: `days_history` (30), `buffer_min` (15), `timezone`
+(`Asia/Kolkata`), and `fresh_hours` (24) — the gate's window. There is a
+standing rule to ask before adding a fifth.
+
+### Gate: is my view ready to refresh?
+
+Before you materialize a view, ask whether its inputs are actually fresh. The
+gate walks every dependency and compares its last qualifying write against a
+rolling window. Streaming tables are always fresh; materialized views are read
+from their pipeline event log.
+
+```python
+from view_scheduler import can_refresh, Config, Workspace
+
+ws = Workspace(warehouse_id="...")
+result = can_refresh(
+    ["catalog.schema.v_orders", "catalog.schema.v_revenue"], ws, Config())
+
+if not result.ready:
+    for view, blocker in result.blockers():
+        print(f"{view} is blocked by {blocker}")
+    raise RuntimeError("an upstream dependency is stale")
+```
+
+```
+BLOCKED c.s.v_revenue   (window 24h)
+  stale c.s.daily_sales  MANAGED  last refresh 2026-10-05 04:01 IST  (60h 00m ago)  outside the 24h window
+  ok    c.s.orders       MANAGED  last refresh 2026-10-07 04:00 IST  (11h 00m ago)
+
+GATE RESULT  BLOCKED   1 of 2 views ready
+```
+
+The gate decides; it never refreshes. It is read-only, like `analyze`. A
+function dependency in a view is a note, not a blocker. Everything else — a
+missing table, an unreadable history, a write outside the window — blocks,
+because the gate fails closed.
 
 **Permissions.** The caller needs `SELECT` on each dependency (for
 `DESCRIBE HISTORY`) and `USE` on the catalogs and schemas involved. Materialized
@@ -136,6 +174,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-135 tests, all offline — no Spark session, no network, no credentials.
+154 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.

@@ -120,3 +120,18 @@ def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
                operation="MV REFRESH", params={}, metrics=None)
         for i, r in enumerate(rows)
     ]
+
+
+def read_commits(ws: "Workspace", table: str) -> list:
+    """History for any physical object: a table, streaming table, or MV.
+
+    DESCRIBE HISTORY covers tables and streaming tables. A materialized view
+    rejects it, so fall back to the pipeline event log.
+    """
+    try:
+        return read_history(ws, table)
+    except Exception as exc:
+        if "EXPECT_TABLE_NOT_VIEW" in str(exc):
+            with obs.call("mv.event_log", table):
+                return read_mv_refreshes(ws, table)
+        raise

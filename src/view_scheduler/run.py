@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Sequence
 
-from . import obs
-from .client import Workspace, failure_category, read_history, read_mv_refreshes
+from .client import Workspace, failure_category, read_commits
 from .config import Config
 from .history import summarize
 from .models import Skipped, TableHistory
@@ -36,14 +35,8 @@ def analyze(view: str, ws: Workspace, config: Config,
 
 
 def _read(ws: Workspace, table: str) -> Sequence:
-    """DESCRIBE HISTORY, falling back to the event log for materialized views."""
-    try:
-        return read_history(ws, table)
-    except Exception as exc:
-        if "EXPECT_TABLE_NOT_VIEW" in str(exc):
-            with obs.call("mv.event_log", table):
-                return read_mv_refreshes(ws, table)
-        raise
+    """History for a table or a materialized view. The logic lives in the client."""
+    return read_commits(ws, table)
 
 
 def _reason(exc: Exception) -> str:
