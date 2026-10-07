@@ -34,7 +34,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.1.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.2.0-py3-none-any.whl
 
 # COMMAND ----------
 
@@ -354,7 +354,7 @@ print(text)
 # MAGIC The same thing without a notebook:
 # MAGIC
 # MAGIC ```bash
-# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.1.0-py3-none-any.whl
+# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.2.0-py3-none-any.whl
 # MAGIC export WAREHOUSE_ID=f96bd3430e175166
 # MAGIC view-scheduler workspace.sched_rig.v_realistic
 # MAGIC view-scheduler workspace.sched_rig.v_healthy --days 60 --buffer 30 --quiet

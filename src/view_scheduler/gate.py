@@ -1,56 +1,65 @@
-"""Gate: is a view safe to refresh now?
+"""Gate: can a view refresh now?
 
-Given a view, or a list of views, walk each one down to its physical tables and
-ask one question per table: did it write within the rolling window?
+Give it a view, or a list of views. It walks each one down to the physical
+tables it reads and checks that every one of them wrote recently.
 
-    READY   — every dependency is fresh. Refresh can proceed.
-    BLOCKED — one or more dependencies are stale, missing, or unreadable. The
-              gate names the table and the view that needs it.
+    READY    every dependency is fresh. The refresh can proceed.
+    BLOCKED  something is stale, missing, or unreadable. The report names the
+             table and the view that needs it.
 
-READ ONLY, and decide only. The gate never triggers a refresh. It answers a
-question; the calling job acts on the answer.
+READ ONLY, and DECIDE ONLY. The gate never refreshes anything. It answers one
+question, and the calling job acts on the answer.
 
-A dependency is fresh when it has a qualifying write within `Config.fresh_hours`
-(default 24) of the reference time. A streaming table is fresh by definition. A
-materialized view is read from its pipeline event log. Anything that cannot be
-read blocks the view (fail closed).
+A dependency is fresh when it has a qualifying write within the last
+`Config.fresh_hours` hours (default 24). A streaming table is fresh by
+definition. A materialized view is read from its pipeline event log. Anything
+we cannot read blocks the view, because the gate fails closed.
+
+    from view_scheduler import can_refresh
+
+    result = can_refresh("sales.gold.customer_360")   # WAREHOUSE_ID from env
+    if result.ready:
+        ...run the refresh...
+    else:
+        print(result)
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .client import Workspace, failure_category, read_commits
+from .client import Workspace, failure_category, read_latest_commit
 from .config import DEFAULT, Config
-from .history import qualifying
-from .models import Skipped
-from .walker import GatingRef, walk_refs
+from .walker import walk_refs
 
 
 @dataclass(frozen=True)
-class DepStatus:
-    """One gating dependency and whether it is fresh enough."""
+class Dependency:
+    """One thing a view waits for, and whether it is ready."""
 
     name: str
     kind: str
-    fresh: bool
+    ok: bool
     last_refresh: datetime | None = None
     age_minutes: int | None = None
-    reason: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
-class ViewGate:
+class ViewResult:
     """The gate verdict for one view."""
 
     view: str
     ready: bool
-    dependencies: tuple[DepStatus, ...] = ()
-    notes: tuple[Skipped, ...] = ()
-    blockers: tuple[Skipped, ...] = ()
+    dependencies: tuple[Dependency, ...] = ()
+
+    def blockers(self) -> tuple[str, ...]:
+        """Names of the dependencies that hold this view up."""
+        return tuple(dep.name for dep in self.dependencies if not dep.ok)
 
 
 @dataclass(frozen=True)
@@ -58,20 +67,18 @@ class GateResult:
     """The gate verdict for a whole call."""
 
     ready: bool
-    views: tuple[ViewGate, ...]
+    views: tuple[ViewResult, ...]
     fresh_hours: int
-    timezone: str = "Asia/Kolkata"
+    timezone: str
 
-    def blockers(self) -> list[tuple[str, str]]:
-        """(view, blocker name) for every reason a view is not ready."""
-        found: list[tuple[str, str]] = []
+    def blockers(self) -> tuple[str, ...]:
+        """Every dependency holding anything up, in order, without repeats."""
+        found: list[str] = []
         for view in self.views:
-            for dep in view.dependencies:
-                if not dep.fresh:
-                    found.append((view.view, dep.name))
-            for skip in view.blockers:
-                found.append((view.view, skip.name))
-        return found
+            for name in view.blockers():
+                if name not in found:
+                    found.append(name)
+        return tuple(found)
 
     def to_dict(self) -> dict:
         """JSON-ready. Safe to log from a job."""
@@ -79,6 +86,7 @@ class GateResult:
             "ready": self.ready,
             "fresh_hours": self.fresh_hours,
             "timezone": self.timezone,
+            "blockers": list(self.blockers()),
             "views": [
                 {
                     "view": view.view,
@@ -87,21 +95,13 @@ class GateResult:
                         {
                             "name": dep.name,
                             "kind": dep.kind,
-                            "fresh": dep.fresh,
-                            "last_refresh": (
-                                dep.last_refresh.isoformat()
-                                if dep.last_refresh else None
-                            ),
+                            "ok": dep.ok,
+                            "last_refresh": (dep.last_refresh.isoformat()
+                                             if dep.last_refresh else None),
                             "age_minutes": dep.age_minutes,
-                            "reason": dep.reason,
+                            "detail": dep.detail,
                         }
                         for dep in view.dependencies
-                    ],
-                    "blockers": [
-                        {"name": s.name, "reason": s.reason} for s in view.blockers
-                    ],
-                    "notes": [
-                        {"name": s.name, "reason": s.reason} for s in view.notes
                     ],
                 }
                 for view in self.views
@@ -109,27 +109,30 @@ class GateResult:
         }
 
     def render(self) -> str:
-        """The human-readable report. One block per view, then the verdict."""
-        lines: list[str] = []
+        """The report a person reads. One block per view, then what to do."""
         zone = ZoneInfo(self.timezone)
-        for view in self.views:
-            head = "READY  " if view.ready else "BLOCKED"
-            lines.append(f"{head} {view.view}   (window {self.fresh_hours}h)")
-            for dep in sorted(view.dependencies, key=lambda d: (d.fresh, d.name)):
-                mark = "ok   " if dep.fresh else "stale"
-                when = _stamp(dep.last_refresh, zone)
-                age = _age(dep.age_minutes)
-                why = f"  {dep.reason}" if dep.reason and not dep.fresh else ""
-                lines.append(f"  {mark} {dep.name}  {dep.kind}  "
-                             f"last refresh {when}  ({age} ago){why}")
-            for skip in view.blockers:
-                lines.append(f"  block {skip.name}  {skip.reason}")
-            for note in view.notes:
-                lines.append(f"  note  {note.name}  {note.reason}")
-        ready = sum(1 for view in self.views if view.ready)
         verdict = "READY" if self.ready else "BLOCKED"
-        lines.append("")
-        lines.append(f"GATE RESULT  {verdict}   {ready} of {len(self.views)} views ready")
+        lines = [
+            f"GATE  {verdict}   {_plural(len(self.views), 'view')}, "
+            f"window {self.fresh_hours}h, times {self.timezone}",
+            "",
+        ]
+        for view in self.views:
+            label = "READY" if view.ready else "BLOCKED"
+            lines.append(f"  {label:<8}{view.view}")
+            if not view.dependencies:
+                lines.append("      note   no dependencies to wait for")
+            for dep in sorted(view.dependencies, key=lambda d: (d.ok, d.name)):
+                lines.append("      " + _dep_line(dep, zone))
+            lines.append("")
+        if self.ready:
+            lines.append("Every dependency is fresh. The refresh can proceed.")
+        else:
+            lines.append("To unblock, refresh:")
+            for view in self.views:
+                for dep in view.dependencies:
+                    if not dep.ok:
+                        lines.append(f"  {dep.name}   (needed by {view.view})")
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -138,112 +141,146 @@ class GateResult:
 
 def can_refresh(
     views: str | Sequence[str],
-    ws: Workspace,
-    config: Config = DEFAULT,
+    ws: Workspace | None = None,
+    config: Config | None = None,
     *,
     now: datetime | None = None,
     fresh_hours: int | None = None,
     quiet: bool = False,
 ) -> GateResult:
-    """Report whether every dependency of each view wrote in the rolling window.
+    """Report whether every dependency of each view wrote recently enough.
 
-    Args:
-        views: one view name, or a sequence of view names.
-        ws: the read-only Workspace (metadata and history).
-        config: supplies the timezone and the default window.
-        now: reference time. Defaults to now() in the config timezone. Pass one
-            in tests to make the result deterministic.
-        fresh_hours: override the window for this call only.
-        quiet: do not print the report. The result is returned either way.
-
-    Returns:
-        A GateResult. `ready` is True only when every listed view is ready.
+    `views` is one view name or a list of them. `ws` defaults to a Workspace
+    built from the WAREHOUSE_ID environment variable, so the common one-liner
+    `can_refresh("catalog.schema.my_view")` works inside a Databricks job.
+    `fresh_hours` overrides `Config.fresh_hours` for this call only. Pass `now`
+    to make a test reproducible. `quiet=True` suppresses the printed report; the
+    result is returned either way.
     """
-    names = [views] if isinstance(views, str) else list(views)
+    names = [views] if isinstance(views, str) else [str(name) for name in views]
     if not names:
         raise ValueError("can_refresh needs at least one view name")
 
-    window = config.fresh_hours if fresh_hours is None else fresh_hours
-    moment = now or datetime.now(config.tz)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=config.tz)
-    cutoff = moment - timedelta(hours=window)
+    settings = config or DEFAULT
+    window = settings.fresh_hours if fresh_hours is None else fresh_hours
+    if window <= 0:
+        raise ValueError(f"fresh_hours must be positive, got {window}")
 
-    # Shared across the whole call, so a table two views depend on is read once.
-    meta_cache: dict[str, dict] = {}
+    moment = now or datetime.now(settings.tz)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=settings.tz)
+    cutoff = moment - timedelta(hours=window)
+    not_after = int(moment.timestamp())
+
+    workspace = ws or _default_workspace()
+
+    # Shared across the whole call: a table two views depend on is read once,
+    # and a failure is remembered rather than retried for every view.
+    meta_cache: dict[str, dict | Exception] = {}
     hist_cache: dict[str, datetime | None | Exception] = {}
 
     def fetch_meta(name: str) -> dict:
         if name not in meta_cache:
-            meta_cache[name] = ws.get_table(name)
-        return meta_cache[name]
+            try:
+                meta_cache[name] = workspace.get_table(name)
+            except Exception as exc:
+                meta_cache[name] = exc
+        cached = meta_cache[name]
+        if isinstance(cached, Exception):
+            raise cached
+        return cached
 
-    def latest_qualifying(name: str) -> datetime | None | Exception:
+    def latest_write(name: str):
         if name not in hist_cache:
             try:
-                commits = read_commits(ws, name)
-            except Exception as exc:          # fail closed: noted, not raised
+                hist_cache[name] = read_latest_commit(
+                    workspace, name, not_after=not_after)
+            except Exception as exc:
                 hist_cache[name] = exc
-                return exc
-            newest: datetime | None = None
-            for commit in commits:
-                if qualifying(commit) and (newest is None or commit.timestamp > newest):
-                    newest = commit.timestamp
-            hist_cache[name] = newest
         return hist_cache[name]
 
-    gates: list[ViewGate] = []
+    results: list[ViewResult] = []
     for view in names:
-        refs, skipped = walk_refs(view, fetch_meta)
-        deps: list[DepStatus] = []
-        for ref in refs:
-            deps.append(_status(ref, None, window) if ref.kind == "STREAMING_TABLE"
-                        else _status(ref, latest_qualifying(ref.name), window,
-                                     cutoff=cutoff, moment=moment))
-        notes = tuple(s for s in skipped if s.benign)
-        blockers = tuple(s for s in skipped if not s.benign)
-        ready = all(dep.fresh for dep in deps) and not blockers
-        gates.append(ViewGate(view, ready, tuple(deps), notes, blockers))
+        refs, blockers, notes = walk_refs(view, fetch_meta)
+        deps = [
+            _measure(ref, None, cutoff, moment, window)
+            if ref.kind == "STREAMING_TABLE"
+            else _measure(ref, latest_write(ref.name), cutoff, moment, window)
+            for ref in refs
+        ]
+        deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
+                 for item in blockers]
+        deps += [Dependency(item.name, "FUNCTION", True, detail=item.reason)
+                 for item in notes]
+        results.append(ViewResult(view, all(dep.ok for dep in deps), tuple(deps)))
 
-    result = GateResult(
-        ready=all(gate.ready for gate in gates),
-        views=tuple(gates),
+    outcome = GateResult(
+        ready=all(view.ready for view in results),
+        views=tuple(results),
         fresh_hours=window,
-        timezone=config.timezone,
+        timezone=settings.timezone,
     )
     if not quiet:
-        print(result)
-    return result
+        print(outcome)
+    return outcome
 
 
-def _status(ref: GatingRef, latest: datetime | None | Exception, window: int,
-            *, cutoff: datetime | None = None,
-            moment: datetime | None = None) -> DepStatus:
+def _default_workspace() -> Workspace:
+    warehouse = os.environ.get("WAREHOUSE_ID")
+    if not warehouse:
+        raise ValueError(
+            "no warehouse: pass Workspace(warehouse_id='...') "
+            "or set the WAREHOUSE_ID environment variable")
+    return Workspace(warehouse_id=warehouse)
+
+
+def _measure(ref, latest, cutoff: datetime, moment: datetime,
+             window: int) -> Dependency:
     """Turn one dependency's newest qualifying write into a fresh/stale verdict."""
     if ref.kind == "STREAMING_TABLE":
-        return DepStatus(ref.name, ref.kind, True, None, None,
-                         "streaming table — always fresh")
+        return Dependency(ref.name, ref.kind, True,
+                          detail="streaming table — always fresh")
     if isinstance(latest, Exception):
-        return DepStatus(ref.name, ref.kind, False, None, None,
-                         f"history unreadable ({failure_category(latest)})")
+        return Dependency(ref.name, ref.kind, False,
+                          detail=f"history unreadable ({failure_category(latest)})")
     if latest is None:
-        return DepStatus(ref.name, ref.kind, False, None, None,
-                         "no qualifying refresh in history")
-    assert cutoff is not None and moment is not None
+        return Dependency(ref.name, ref.kind, False,
+                          detail="no qualifying refresh in history")
     minutes = max(0, int((moment - latest).total_seconds() // 60))
     fresh = latest >= cutoff
-    return DepStatus(ref.name, ref.kind, fresh, latest, minutes,
-                     "" if fresh else f"outside the {window}h window")
+    return Dependency(ref.name, ref.kind, fresh, latest, minutes,
+                      "" if fresh else f"older than the {window}h window")
 
 
-def _stamp(value: datetime | None, zone: ZoneInfo) -> str:
-    if value is None:
-        return "never"
+def _dep_line(dep: Dependency, zone: ZoneInfo) -> str:
+    if dep.ok and dep.last_refresh is None:
+        return f"note   {dep.name}  ({dep.kind})  {dep.detail}"
+    mark = "fresh" if dep.ok else "stale"
+    line = f"{mark}  {dep.name}  ({dep.kind})"
+    if dep.last_refresh is None:
+        return f"{line}  {dep.detail}"
+    line += (f"  last refresh {_stamp(dep.last_refresh, zone)}"
+             f" ({_human_age(dep.age_minutes)} ago)")
+    if not dep.ok and dep.detail:
+        line += f" — {dep.detail}"
+    return line
+
+
+def _stamp(value: datetime, zone: ZoneInfo) -> str:
     return value.astimezone(zone).strftime("%Y-%m-%d %H:%M %Z")
 
 
-def _age(minutes: int | None) -> str:
+def _human_age(minutes: int | None) -> str:
     if minutes is None:
-        return "-"
+        return "?"
+    if minutes < 60:
+        return f"{minutes}m"
     hours, rest = divmod(minutes, 60)
-    return f"{hours}h {rest:02d}m" if hours else f"{rest}m"
+    if hours < 24:
+        return f"{hours}h {rest:02d}m"
+    days, leftover = divmod(hours, 24)
+    return f"{days}d {leftover}h"
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"

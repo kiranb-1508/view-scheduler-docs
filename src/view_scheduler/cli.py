@@ -17,15 +17,16 @@ def build_parser() -> argparse.ArgumentParser:
         prog="view-scheduler",
         description="Recommend the earliest daily time a Unity Catalog view can "
                     "be materialized with every dependency already refreshed.",
-        epilog="ADVISORY ONLY: nothing verifies at runtime that dependencies "
-               "refreshed. A wrong recommendation publishes stale data silently.",
+        epilog="ADVISORY: this recommends a time from history, it does not "
+               "check today. For a runtime check use can_refresh() from the "
+               "library.",
     )
     parser.add_argument("view", help="fully qualified view, e.g. catalog.schema.view")
     parser.add_argument(
         "--warehouse-id", default=os.environ.get("WAREHOUSE_ID"),
         help="SQL warehouse to run history reads against "
              "(default: $WAREHOUSE_ID)")
-    # The three Config fields, and deliberately no fourth — see config.py.
+    # The three analysis settings. The gate's fresh_hours is library-only.
     parser.add_argument("--days", type=int, default=Config.days_history,
                         metavar="N", help="days of history to read")
     parser.add_argument("--buffer", type=int, default=Config.buffer_min,
