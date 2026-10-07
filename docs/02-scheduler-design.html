@@ -340,7 +340,7 @@ def recommend(tables, buffer_min=15):
 
 <section>
   <h2><span class="num">06</span>Config and output</h2>
-  <p>Three parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST).</p>
+  <p>Four parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST), and <code>fresh_hours</code> (24 — the gate's rolling window).</p>
   <p><strong>Timestamps are read as epochs, not as rendered strings.</strong> A Databricks <code>TIMESTAMP</code> renders in the warehouse's session timezone, and the Statement Execution API appends a <code>Z</code> suffix whose accuracy therefore depends on warehouse configuration this tool does not control. Selecting <code>unix_timestamp(timestamp)</code> sidesteps the question entirely — an epoch is the same instant however the session renders it. The single <code>timezone</code> parameter then decides which local day each instant falls on, which is the only place a timezone should matter.</p>
   <p>The report carries: the two times, the per-dependency table (<code>REFRESHES / USUAL / WORST / DAYS / MISSED</code>), the day-by-day all-clear series behind those two numbers, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
 </section>
@@ -360,12 +360,11 @@ def recommend(tables, buffer_min=15):
 
 <section>
   <h2><span class="num">08</span>Described here but not built</h2>
-  <p>Kept in one place so no section above reads as shipped when it is not.</p>
+  <p>Kept in one place so no section above reads as shipped when it is not. The runtime gate used to be on this list; it now ships as <code>can_refresh()</code>.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Not built</th><th>Consequence today</th></tr></thead>
       <tbody>
-        <tr><td><strong>The runtime gate</strong> (<code>wait_for_deps</code> in the plan doc)</td><td>The recommendation is advisory. Nothing verifies at materialization time that dependencies actually refreshed, so nothing covers day 31.</td></tr>
         <tr><td><strong>Concurrency and 429 backoff</strong> in the walker</td><td>The walk is serial — one REST call per object, and step 1 is the cost bottleneck. A wide dependency graph is slow, and a throttle becomes a skipped entry rather than a retry.</td></tr>
         <tr><td><strong>Per-table retention windows</strong></td><td><code>days_history</code> is a flat cutoff for every table. A dependency with a short <code>delta.logRetentionDuration</code> reports a large <code>MISSED</code> count that looks like a reliability problem but is only a shorter history.</td></tr>
         <tr><td><strong>A day-boundary parameter</strong></td><td>Days are calendar days in the configured timezone. A pipeline that genuinely straddles midnight cannot be re-anchored; the report flags a past-midnight start but does not model the cycle.</td></tr>

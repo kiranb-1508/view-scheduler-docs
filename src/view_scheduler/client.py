@@ -3,52 +3,93 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
 
 from . import obs
+from .history import qualifying
+
+
+def quote_name(full_name: str) -> str:
+    """Backtick each part of a dotted Unity Catalog name.
+
+    A hyphen, a space, or a reserved word is a syntax error unless the name is
+    quoted, and an unquoted name is an injection surface. An internal backtick
+    is doubled so it cannot close the identifier early.
+    """
+    parts = [part.strip() for part in str(full_name).split(".")]
+    if not parts or any(not part for part in parts):
+        raise ValueError(f"not a Unity Catalog name: {full_name!r}")
+    return ".".join("`" + part.replace("`", "``") + "`" for part in parts)
+
 
 class Workspace:
     """Thin wrapper over the SDK. One method per external call we make."""
 
-    def __init__(self, client: WorkspaceClient | None = None, warehouse_id: str | None = None):
+    def __init__(self, client: WorkspaceClient | None = None,
+                 warehouse_id: str | None = None):
         self.w = client or WorkspaceClient()
         self.warehouse_id = warehouse_id
 
     # --- Unity Catalog -------------------------------------------------------
 
     def get_table(self, full_name: str) -> dict:
-        """Raw GET for a single table's metadata including view_dependencies."""
+        """Raw GET for one table's metadata, including view_dependencies."""
+        path = quote(full_name, safe=".")
         with obs.call("uc.tables.get", full_name):
             return self.w.api_client.do(
-                "GET", f"/api/2.1/unity-catalog/tables/{full_name}")
+                "GET", f"/api/2.1/unity-catalog/tables/{path}")
 
     # --- SQL -----------------------------------------------------------------
 
     def sql(self, statement: str, target: str) -> list[dict[str, Any]]:
-        """Run a read-only statement, return rows as dicts of strings."""
+        """Run a read-only statement. Return every row as a dict of strings.
+
+        Follows result chunking to the end, and refuses a truncated result, so a
+        caller never silently sees only the first page of a large result.
+        """
         if self.warehouse_id is None:
             raise ValueError("warehouse_id is required for SQL calls")
 
         with obs.call("sql", target):
             resp = self.w.statement_execution.execute_statement(
-                warehouse_id=self.warehouse_id, statement=statement,
-                wait_timeout="50s")
+                warehouse_id=self.warehouse_id,
+                statement=statement,
+                wait_timeout="50s",
+                on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
+            )
             state = resp.status.state.value if resp.status and resp.status.state else "?"
             if state != "SUCCEEDED":
                 message = (resp.status.error.message
                            if resp.status and resp.status.error else state)
                 raise RuntimeError(message)
+
+            if resp.manifest and resp.manifest.truncated:
+                raise RuntimeError(
+                    f"the warehouse truncated the result for {target}; "
+                    f"the answer would be incomplete")
+
             columns = [c.name for c in resp.manifest.schema.columns]
-            data = (resp.result.data_array if resp.result else None) or []
-            return [dict(zip(columns, row)) for row in data]
+            rows = list((resp.result.data_array if resp.result else None) or [])
+            chunk = resp.result.next_chunk_index if resp.result else None
+            while chunk is not None:
+                page = self.w.statement_execution.get_statement_result_chunk_n(
+                    resp.statement_id, chunk)
+                rows.extend(page.data_array or [])
+                chunk = page.next_chunk_index
+
+            return [dict(zip(columns, row)) for row in rows]
 
 
 def failure_category(exc: Exception) -> str:
     """Classify an SDK/SQL error as 'permission', 'not_found', 'mv_no_history', or 'other'."""
     text = str(exc).lower()
-    if "permission" in text or "does not have" in text or "403" in text:
+    if ("permission" in text or "does not have" in text or "403" in text
+            or "401" in text or "unauthorized" in text):
         return "permission"
     if "does not exist" in text or "not found" in text or "404" in text:
         return "not_found"
@@ -82,35 +123,48 @@ def _from_epoch(value):
     is warehouse configuration this tool does not control. Verified identical to
     the string path on a UTC warehouse; correct on any other.
     """
-    from datetime import datetime, timezone
+    from datetime import timezone
     return datetime.fromtimestamp(int(value), tz=timezone.utc)
 
 
-def read_history(ws: "Workspace", table: str) -> list:
-    """DESCRIBE HISTORY for a physical Delta table."""
+def read_history(ws: "Workspace", table: str, *,
+                 with_metrics: bool = True) -> list:
+    """Every commit for a physical Delta table, newest first.
+
+    `with_metrics=False` drops the wide operationMetrics column. The gate only
+    classifies commits, so it never needs it; analyze() does.
+    """
     from .models import Commit
+    metrics = ", operationMetrics" if with_metrics else ""
     rows = ws.sql(
         "SELECT version, unix_timestamp(timestamp) AS ts_epoch, operation, "
-        f"operationParameters, operationMetrics FROM (DESCRIBE HISTORY {table})",
+        f"operationParameters{metrics} "
+        f"FROM (DESCRIBE HISTORY {quote_name(table)}) "
+        "ORDER BY version DESC",
         target=table)
     return [
         Commit(
             version=int(r.get("version") or 0),
             timestamp=_from_epoch(r["ts_epoch"]),
-            operation=r.get("operation") or "",
+            operation=str(r.get("operation") or ""),
             params=parse_json_field(r.get("operationParameters")) or {},
-            metrics=parse_json_field(r.get("operationMetrics")),
+            metrics=(parse_json_field(r.get("operationMetrics"))
+                     if with_metrics else None),
         )
         for r in rows
     ]
 
 
 def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
-    """Read completed MV refreshes from the pipeline event log (DESCRIBE HISTORY is rejected on MVs)."""
+    """Completed MV refreshes from the pipeline event log.
+
+    DESCRIBE HISTORY is rejected on a materialized view, so this is the only
+    way to see when it last refreshed.
+    """
     from .models import Commit
     statement = (
         "SELECT unix_timestamp(timestamp) AS ts_epoch "
-        f"FROM event_log(TABLE({mv})) "
+        f"FROM event_log(TABLE({quote_name(mv)})) "
         "WHERE event_type = 'update_progress' "
         "AND get_json_object(details, '$.update_progress.state') = 'COMPLETED'"
     )
@@ -122,16 +176,36 @@ def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
     ]
 
 
-def read_commits(ws: "Workspace", table: str) -> list:
+def read_commits(ws: "Workspace", table: str, *,
+                 with_metrics: bool = True) -> list:
     """History for any physical object: a table, streaming table, or MV.
 
     DESCRIBE HISTORY covers tables and streaming tables. A materialized view
     rejects it, so fall back to the pipeline event log.
     """
     try:
-        return read_history(ws, table)
+        return read_history(ws, table, with_metrics=with_metrics)
     except Exception as exc:
-        if "EXPECT_TABLE_NOT_VIEW" in str(exc):
+        if "expect_table_not_view" in str(exc).lower():
             with obs.call("mv.event_log", table):
                 return read_mv_refreshes(ws, table)
         raise
+
+
+def read_latest_commit(ws: "Workspace", table: str, *,
+                       not_after: int | None = None) -> datetime | None:
+    """The newest qualifying write for a table or an MV, or None.
+
+    This is the gate's one question. A write dated after `not_after` (epoch
+    seconds) is ignored, so a clock-skewed future commit cannot make a stale
+    table look fresh.
+    """
+    newest: datetime | None = None
+    for commit in read_commits(ws, table, with_metrics=False):
+        if not qualifying(commit):
+            continue
+        if not_after is not None and commit.timestamp.timestamp() > not_after:
+            continue
+        if newest is None or commit.timestamp > newest:
+            newest = commit.timestamp
+    return newest

@@ -1,4 +1,4 @@
-"""The gate: freshness, fail-closed, and the rolling window.
+"""The gate: freshness, fail-closed, the rolling window, and the report.
 
 Every case runs against a fake Workspace — no network, no warehouse, no Spark.
 The clock is pinned with `now=` so the rolling window is deterministic.
@@ -12,263 +12,345 @@ import pytest
 from conftest import FakeWorkspace
 from tests import fixtures as f
 from view_scheduler.config import Config
-from view_scheduler.gate import GateResult, can_refresh
+from view_scheduler.gate import Dependency, GateResult, ViewResult, can_refresh
 
 UTC = timezone.utc
 NOW = f.at("2026-08-06", "12:00")          # noon UTC
 CONFIG = Config(timezone="UTC")
 
 
-def overwrite(day, hhmm, rows="100"):
-    """One full-replace commit at a wall-clock time."""
-    return [f.raw_history_row(0, f.at(day, hhmm), "WRITE",
-                              {"mode": "Overwrite"}, {"numOutputRows": rows})]
+def ago(hours):
+    return NOW - timedelta(hours=hours)
 
 
-def append(day, hhmm, rows="10"):
-    return [f.raw_history_row(0, f.at(day, hhmm), "WRITE",
-                              {"mode": "Append"}, {"numOutputRows": rows})]
+def write(hours_ago, mode="Overwrite", rows="100", version=0):
+    return f.raw_history_row(version, ago(hours_ago), "WRITE",
+                             {"mode": mode}, {"numOutputRows": rows})
 
 
-def workspace(tables, history=None, **kwargs):
-    return FakeWorkspace(tables=tables, history=history or {}, **kwargs)
+def optimize(hours_ago, version=0):
+    return f.raw_history_row(version, ago(hours_ago), "OPTIMIZE", {},
+                             {"numRemovedFiles": "3"})
+
+
+def run(views, ws, **kwargs):
+    kwargs.setdefault("now", NOW)
+    kwargs.setdefault("quiet", True)
+    return can_refresh(views, ws, CONFIG, **kwargs)
+
+
+def dep(result, view=0, name=None):
+    """The Dependency named `name`, or the first one, from one view's result."""
+    deps = result.views[view].dependencies
+    if name is None:
+        return deps[0]
+    return next(d for d in deps if name in d.name)
+
+
+def view_of(names):
+    return {"c.s.v": f.uc_view("c.s.v", names),
+            **{n: f.uc_table(n) for n in names}}
 
 
 # --- the happy path ----------------------------------------------------------
 
 def test_all_fresh_is_ready():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t1", "c.s.t2"]),
-                "c.s.t1": f.uc_table("c.s.t1"),
-                "c.s.t2": f.uc_table("c.s.t2")},
-        history={"c.s.t1": overwrite("2026-08-06", "04:00"),
-                 "c.s.t2": append("2026-08-06", "06:00")},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+    ws = FakeWorkspace(tables=view_of(["c.s.t1", "c.s.t2"]),
+                       history={"c.s.t1": [write(8)],
+                                "c.s.t2": [write(6, mode="Append")]})
+    result = run("c.s.v", ws)
+    assert isinstance(result, GateResult)
     assert result.ready is True
     assert result.views[0].ready is True
-    assert len(result.views[0].dependencies) == 2
-    assert all(dep.fresh for dep in result.views[0].dependencies)
-    assert result.blockers() == []
-    assert result.views[0].blockers == ()
+    assert [d.ok for d in result.views[0].dependencies] == [True, True]
+    assert result.blockers() == ()
 
 
 def test_zero_row_append_still_counts_as_a_refresh():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": append("2026-08-06", "04:00", rows="0")},
-    )
-    assert can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True).ready is True
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": [write(8, mode="Append", rows="0")]})
+    assert run("c.s.v", ws).ready is True
 
 
-def test_maintenance_only_history_is_not_a_refresh():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": [f.raw_history_row(
-            0, f.at("2026-08-06", "04:00"), "OPTIMIZE", {}, {"numRemovedFiles": "3"})]},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+def test_maintenance_only_history_is_stale():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": [optimize(1)]})
+    result = run("c.s.v", ws)
     assert result.ready is False
-    dep = result.views[0].dependencies[0]
-    assert dep.last_refresh is None
-    assert dep.reason == "no qualifying refresh in history"
+    assert dep(result).detail == "no qualifying refresh in history"
+
+
+def test_newest_qualifying_write_wins_not_the_newest_commit():
+    # A fresh OPTIMIZE must not masquerade as a refresh, and the newest
+    # qualifying write must win even when it is not the first row.
+    stale = FakeWorkspace(tables=view_of(["c.s.t"]),
+                          history={"c.s.t": [optimize(1), write(40, version=1)]})
+    result = run("c.s.v", stale)
+    assert result.ready is False
+    assert dep(result).last_refresh == ago(40)
+
+    fresh = FakeWorkspace(tables=view_of(["c.s.t"]),
+                          history={"c.s.t": [write(40, version=1),
+                                             write(2, mode="Merge", version=2)]})
+    assert run("c.s.v", fresh).ready is True
 
 
 # --- blocking ----------------------------------------------------------------
 
-def test_one_stale_blocks_and_names_the_view():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t_fresh", "c.s.t_old"]),
-                "c.s.t_fresh": f.uc_table("c.s.t_fresh"),
-                "c.s.t_old": f.uc_table("c.s.t_old")},
-        history={"c.s.t_fresh": overwrite("2026-08-06", "05:00"),
-                 "c.s.t_old": overwrite("2026-08-04", "05:00")},   # 55h old
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+def test_one_stale_blocks_and_the_report_names_the_view():
+    ws = FakeWorkspace(
+        tables=view_of(["c.s.t_fresh", "c.s.t_old"]),
+        history={"c.s.t_fresh": [write(8)], "c.s.t_old": [write(56)]})
+    result = run("c.s.v", ws)
     assert result.ready is False
-    assert result.blockers() == [("c.s.v", "c.s.t_old")]
+    assert result.blockers() == ("c.s.t_old",)
+    assert result.views[0].blockers() == ("c.s.t_old",)
+    assert "older than the 24h window" in dep(result, name="t_old").detail
     text = str(result)
-    assert "BLOCKED" in text
-    assert "c.s.v" in text and "c.s.t_old" in text
-    assert "outside the 24h window" in text
+    assert "BLOCKED" in text and "c.s.t_old" in text
 
 
 def test_no_history_blocks():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={})
+    result = run("c.s.v", ws)
     assert result.ready is False
-    assert result.views[0].dependencies[0].reason == "no qualifying refresh in history"
+    assert dep(result).detail == "no qualifying refresh in history"
 
 
 def test_unreadable_history_blocks_fail_closed():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history_errors={"c.s.t": RuntimeError("User does not have SELECT on c.s.t")},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history_errors={"c.s.t": RuntimeError(
+                           "User does not have SELECT on c.s.t")})
+    result = run("c.s.v", ws)
     assert result.ready is False
-    assert "history unreadable" in result.views[0].dependencies[0].reason
+    assert dep(result).detail == "history unreadable (permission)"
 
 
 def test_foreign_dependency_blocks():
-    ws = workspace(
+    ws = FakeWorkspace(
         tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t", "c.s.ext"]),
                 "c.s.t": f.uc_table("c.s.t"),
                 "c.s.ext": f.uc_table("c.s.ext", table_type="FOREIGN")},
-        history={"c.s.t": overwrite("2026-08-06", "04:00")},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+        history={"c.s.t": [write(8)]})
+    result = run("c.s.v", ws)
     assert result.ready is False
-    assert result.blockers() == [("c.s.v", "c.s.ext")]
+    assert result.blockers() == ("c.s.ext",)
+    assert "FOREIGN" in dep(result, name="ext").detail
+
+
+def test_cycle_blocks_instead_of_passing():
+    ws = FakeWorkspace(tables=dict(f.CYCLE), history={})
+    result = run("c.s.v_a", ws)
+    assert result.ready is False, "a cycle must not report READY"
+    assert "circular dependency" in dep(result).detail
+
+
+def test_root_view_not_found_blocks():
+    ws = FakeWorkspace(tables={}, table_errors={
+        "c.s.missing": KeyError("Table 'c.s.missing' does not exist")})
+    result = run("c.s.missing", ws)
+    assert result.ready is False
+    assert result.blockers() == ("c.s.missing",)
+    assert dep(result).detail == "not found"
 
 
 # --- special object types ----------------------------------------------------
 
-def test_streaming_table_is_always_fresh():
-    ws = workspace(
+def test_streaming_table_is_always_fresh_and_its_history_is_not_read():
+    ws = FakeWorkspace(
         tables={"c.s.v": f.uc_view("c.s.v", ["c.s.st"]),
                 "c.s.st": f.uc_table("c.s.st", table_type="STREAMING_TABLE")},
-        history={},   # deliberately no history at all
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+        history={})
+    result = run("c.s.v", ws)
     assert result.ready is True
-    dep = result.views[0].dependencies[0]
-    assert dep.kind == "STREAMING_TABLE" and dep.fresh is True
+    assert dep(result).kind == "STREAMING_TABLE"
+    assert "c.s.st" not in ws.sql_calls, "a streaming table's history is never read"
 
 
 def test_materialized_view_reads_its_event_log():
-    ws = workspace(
+    ws = FakeWorkspace(
         tables={"c.s.v": f.uc_view("c.s.v", ["c.s.mv"]),
                 "c.s.mv": f.uc_table("c.s.mv", table_type="MATERIALIZED_VIEW")},
-        mv_events={"c.s.mv": [
-            {"ts_epoch": str(int(f.at("2026-08-06", "05:00").timestamp()))}]},
+        mv_events={"c.s.mv": [{"ts_epoch": str(int(ago(5).timestamp()))}]},
         history_errors={"c.s.mv": RuntimeError(
-            "[EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE] expects a table")},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+            "[EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE] expects a table")})
+    result = run("c.s.v", ws)
     assert result.ready is True
-    assert result.views[0].dependencies[0].last_refresh == f.at("2026-08-06", "05:00")
+    assert dep(result).last_refresh == ago(5)
+
+
+def test_materialized_view_whose_event_log_fails_blocks():
+    ws = FakeWorkspace(
+        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.mv"]),
+                "c.s.mv": f.uc_table("c.s.mv", table_type="MATERIALIZED_VIEW")},
+        history_errors={"c.s.mv": RuntimeError("EXPECT_TABLE_NOT_VIEW expects a table")},
+        mv_event_errors={"c.s.mv": RuntimeError(
+            "User does not have permission on the pipeline")})
+    result = run("c.s.v", ws)
+    assert result.ready is False
+    assert "history unreadable" in dep(result).detail
 
 
 # --- notes vs blockers -------------------------------------------------------
 
 def test_function_dependency_is_a_note_not_a_blocker():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"], functions=1),
-                "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": overwrite("2026-08-06", "04:00")},
-    )
-    result = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
+    ws = FakeWorkspace(tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"], functions=1),
+                               "c.s.t": f.uc_table("c.s.t")},
+                       history={"c.s.t": [write(8)]})
+    result = run("c.s.v", ws)
     assert result.ready is True
-    assert result.views[0].blockers == ()
-    assert len(result.views[0].notes) == 1
-    assert "function" in result.views[0].notes[0].reason
+    note = dep(result, name="udf")
+    assert note.ok is True and "function" in note.detail
 
 
 # --- the rolling window ------------------------------------------------------
 
-def test_write_exactly_at_the_window_edge_is_fresh():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": [f.raw_history_row(
-            0, NOW - timedelta(hours=24), "WRITE", {"mode": "Overwrite"}, {})]},
-    )
-    assert can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True).ready is True
+def test_write_at_the_window_edge_is_fresh_just_past_is_stale():
+    at_edge = FakeWorkspace(tables=view_of(["c.s.t"]),
+                            history={"c.s.t": [write(24)]})
+    assert run("c.s.v", at_edge).ready is True
 
-
-def test_write_just_past_the_window_edge_is_stale():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": [f.raw_history_row(
-            0, NOW - timedelta(hours=24, seconds=1), "WRITE",
-            {"mode": "Overwrite"}, {})]},
-    )
-    assert can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True).ready is False
+    past = FakeWorkspace(tables=view_of(["c.s.t"]),
+                         history={"c.s.t": [f.raw_history_row(
+                             0, ago(24) - timedelta(seconds=1), "WRITE",
+                             {"mode": "Overwrite"}, {})]})
+    assert run("c.s.v", past).ready is False
 
 
 def test_fresh_hours_can_be_overridden_per_call():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": overwrite("2026-08-04", "18:00")},   # 42h old
-    )
-    assert can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True).ready is False
-    assert can_refresh("c.s.v", ws, CONFIG, now=NOW,
-                       fresh_hours=48, quiet=True).ready is True
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(42)]})
+    assert run("c.s.v", ws).ready is False
+    assert run("c.s.v", ws, fresh_hours=48).ready is True
+
+
+def test_config_fresh_hours_is_used_when_not_overridden():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(42)]})
+    wide = Config(timezone="UTC", fresh_hours=48)
+    assert can_refresh("c.s.v", ws, wide, now=NOW, quiet=True).ready is True
+
+
+def test_non_positive_window_is_rejected():
+    ws = FakeWorkspace(tables={})
+    with pytest.raises(ValueError, match="fresh_hours"):
+        run("c.s.v", ws, fresh_hours=0)
+
+
+def test_future_dated_write_is_ignored():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": [f.raw_history_row(
+                           0, NOW + timedelta(hours=2), "WRITE",
+                           {"mode": "Overwrite"}, {})]})
+    result = run("c.s.v", ws)
+    assert result.ready is False
+    assert dep(result).detail == "no qualifying refresh in history"
+
+
+def test_naive_now_is_localised_to_the_config_timezone():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(8)]})
+    result = can_refresh("c.s.v", ws, CONFIG,
+                         now=datetime(2026, 8, 6, 12, 0), quiet=True)
+    assert result.ready is True
 
 
 # --- lists, caching, printing ------------------------------------------------
 
-def test_list_returns_per_view_detail_and_one_overall_flag():
-    ws = workspace(
+def test_list_gives_per_view_detail_and_one_overall_flag():
+    ws = FakeWorkspace(
         tables={"c.s.v1": f.uc_view("c.s.v1", ["c.s.t1"]),
                 "c.s.t1": f.uc_table("c.s.t1"),
                 "c.s.v2": f.uc_view("c.s.v2", ["c.s.t2"]),
                 "c.s.t2": f.uc_table("c.s.t2")},
-        history={"c.s.t1": overwrite("2026-08-06", "04:00"),
-                 "c.s.t2": overwrite("2026-08-01", "04:00")},   # stale
-    )
-    result = can_refresh(["c.s.v1", "c.s.v2"], ws, CONFIG, now=NOW, quiet=True)
+        history={"c.s.t1": [write(8)], "c.s.t2": [write(100)]})
+    result = run(["c.s.v1", "c.s.v2"], ws)
     assert [v.view for v in result.views] == ["c.s.v1", "c.s.v2"]
     assert result.views[0].ready is True
     assert result.views[1].ready is False
     assert result.ready is False
 
 
-def test_shared_dependency_is_fetched_once_across_a_list():
-    class Counting(FakeWorkspace):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.looked_up = []
-
-        def get_table(self, full_name):
-            self.looked_up.append(full_name)
-            return super().get_table(full_name)
-
-    ws = Counting(
+def test_shared_dependency_is_read_once():
+    ws = FakeWorkspace(
         tables={"c.s.v1": f.uc_view("c.s.v1", ["c.s.shared"]),
                 "c.s.v2": f.uc_view("c.s.v2", ["c.s.shared"]),
                 "c.s.shared": f.uc_table("c.s.shared")},
-        history={"c.s.shared": overwrite("2026-08-06", "04:00")},
-    )
-    can_refresh(["c.s.v1", "c.s.v2"], ws, CONFIG, now=NOW, quiet=True)
-    assert ws.looked_up.count("c.s.shared") == 1
+        history={"c.s.shared": [write(8)]})
+    run(["c.s.v1", "c.s.v2"], ws)
+    assert ws.get_table_calls.count("c.s.shared") == 1
+    assert ws.sql_calls.count("c.s.shared") == 1
+
+
+def test_a_failed_lookup_is_not_retried_for_every_view():
+    ws = FakeWorkspace(
+        tables={"c.s.v1": f.uc_view("c.s.v1", ["c.s.broken"]),
+                "c.s.v2": f.uc_view("c.s.v2", ["c.s.broken"]),
+                "c.s.broken": f.uc_table("c.s.broken")},
+        table_errors={"c.s.broken": PermissionError("does not have USAGE")})
+    result = run(["c.s.v1", "c.s.v2"], ws)
+    assert ws.get_table_calls.count("c.s.broken") == 1
+    assert result.ready is False
+
+
+def test_duplicate_view_names_are_both_reported():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(8)]})
+    result = run(["c.s.v", "c.s.v"], ws)
+    assert len(result.views) == 2
+    assert result.ready is True
 
 
 def test_prints_by_default_and_is_silent_when_quiet(capsys):
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": overwrite("2026-08-06", "04:00")},
-    )
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(8)]})
     can_refresh("c.s.v", ws, CONFIG, now=NOW)
-    assert "GATE RESULT  READY" in capsys.readouterr().out
+    assert "GATE  READY" in capsys.readouterr().out
 
     can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True)
     assert capsys.readouterr().out == ""
 
 
 def test_to_dict_is_json_serialisable():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": overwrite("2026-08-06", "04:00")},
-    )
-    payload = can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True).to_dict()
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(8)]})
+    payload = run("c.s.v", ws).to_dict()
     assert payload["ready"] is True
+    assert payload["blockers"] == []
     assert payload["views"][0]["dependencies"][0]["name"] == "c.s.t"
     json.dumps(payload)   # must not raise
 
 
 def test_empty_input_is_rejected():
-    ws = workspace(tables={})
-    with pytest.raises(ValueError):
-        can_refresh([], ws, CONFIG, now=NOW, quiet=True)
+    with pytest.raises(ValueError, match="at least one view"):
+        can_refresh([], FakeWorkspace(tables={}), CONFIG, now=NOW, quiet=True)
 
 
-def test_result_is_a_gate_result():
-    ws = workspace(
-        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": f.uc_table("c.s.t")},
-        history={"c.s.t": overwrite("2026-08-06", "04:00")},
-    )
-    assert isinstance(can_refresh("c.s.v", ws, CONFIG, now=NOW, quiet=True), GateResult)
+def test_default_workspace_requires_the_environment(monkeypatch):
+    monkeypatch.delenv("WAREHOUSE_ID", raising=False)
+    with pytest.raises(ValueError, match="WAREHOUSE_ID"):
+        can_refresh("c.s.v", None, CONFIG, now=NOW, quiet=True)
+
+
+def test_result_types_are_exported_and_frozen():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": [write(8)]})
+    result = run("c.s.v", ws)
+    assert isinstance(result.views[0], ViewResult)
+    assert isinstance(result.views[0].dependencies[0], Dependency)
+    with pytest.raises(Exception):
+        result.ready = False        # frozen
+
+
+# --- the report --------------------------------------------------------------
+
+def test_golden_report():
+    ws = FakeWorkspace(
+        tables=view_of(["c.s.t_fresh", "c.s.t_old"]),
+        history={"c.s.t_fresh": [write(8)], "c.s.t_old": [write(56)]})
+    expected = "\n".join([
+        "GATE  BLOCKED   1 view, window 24h, times UTC",
+        "",
+        "  BLOCKED c.s.v",
+        "      stale  c.s.t_old  (MANAGED)  last refresh 2026-08-04 04:00 UTC "
+        "(2d 8h ago) — older than the 24h window",
+        "      fresh  c.s.t_fresh  (MANAGED)  last refresh 2026-08-06 04:00 UTC "
+        "(8h 00m ago)",
+        "",
+        "To unblock, refresh:",
+        "  c.s.t_old   (needed by c.s.v)",
+    ])
+    assert run("c.s.v", ws).render() == expected

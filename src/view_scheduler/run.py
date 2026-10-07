@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Sequence
 
 from .client import Workspace, failure_category, read_commits
 from .config import Config
@@ -23,7 +22,7 @@ def analyze(view: str, ws: Workspace, config: Config,
     histories: list[TableHistory] = []
     for table in gating:
         try:
-            commits = _read(ws, table)
+            commits = read_commits(ws, table)
         except Exception as exc:
             skipped.append(Skipped(table, _reason(exc)))
             continue
@@ -32,11 +31,6 @@ def analyze(view: str, ws: Workspace, config: Config,
     result = recommend(histories, config.buffer_min)
     text = render(view, result, skipped, config.timezone)
     return text, histories, skipped
-
-
-def _read(ws: Workspace, table: str) -> Sequence:
-    """History for a table or a materialized view. The logic lives in the client."""
-    return read_commits(ws, table)
 
 
 def _reason(exc: Exception) -> str:

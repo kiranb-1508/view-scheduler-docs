@@ -25,8 +25,9 @@ HARD RULES
 - No SQL parsing of view definitions.
 - No environment changes. Never require altering delta.logRetentionDuration or
   any table property.
-- Exactly three config parameters: days_history=30, buffer_min=15,
-  timezone="Asia/Kolkata". Ask before adding a fourth.
+- Exactly four config parameters: days_history=30, buffer_min=15,
+  timezone="Asia/Kolkata", fresh_hours=24 (the gate's window). Ask before
+  adding a fifth.
 - Output must be readable by a junior engineer at 3am.
 
 DOMAIN FACTS — established, do not rediscover or "improve"

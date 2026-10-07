@@ -26,7 +26,7 @@ refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
-commit history. Until that completes, treat output as indicative. Hence `0.1.0`.
+commit history. Until that completes, treat output as indicative. Hence `0.2.0`.
 
 ## Install
 
@@ -46,7 +46,7 @@ Build and upload a release:
 
 ```bash
 python -m build --wheel
-databricks fs cp dist/view_scheduler-0.1.0-py3-none-any.whl \
+databricks fs cp dist/view_scheduler-0.2.0-py3-none-any.whl \
   dbfs:/Volumes/<catalog>/<schema>/libs/
 ```
 
@@ -55,7 +55,7 @@ Keep old versions in the volume so running jobs can stay pinned.
 Then, in a notebook:
 
 ```python
-%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.1.0-py3-none-any.whl
+%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.2.0-py3-none-any.whl
 dbutils.library.restartPython()
 ```
 
@@ -65,7 +65,7 @@ Or as a job library, including from a DAB:
 tasks:
   - task_key: recommend
     libraries:
-      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.1.0-py3-none-any.whl
+      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.2.0-py3-none-any.whl
 ```
 
 ### From source
@@ -108,41 +108,64 @@ standing rule to ask before adding a fifth.
 ### Gate: is my view ready to refresh?
 
 Before you materialize a view, ask whether its inputs are actually fresh. The
-gate walks every dependency and compares its last qualifying write against a
-rolling window. Streaming tables are always fresh; materialized views are read
-from their pipeline event log.
+gate walks every dependency and checks that its last real write is inside a
+rolling window (24 hours by default).
 
 ```python
-from view_scheduler import can_refresh, Config, Workspace
+from view_scheduler import can_refresh
 
-ws = Workspace(warehouse_id="...")
-result = can_refresh(
-    ["catalog.schema.v_orders", "catalog.schema.v_revenue"], ws, Config())
+result = can_refresh("sales.gold.v_orders")          # WAREHOUSE_ID from $env
+if result.ready:
+    ...run the refresh...
+else:
+    print(result)                                    # says exactly what to fix
+```
 
-if not result.ready:
-    for view, blocker in result.blockers():
-        print(f"{view} is blocked by {blocker}")
-    raise RuntimeError("an upstream dependency is stale")
+A list works the same way. You get one verdict per view, and one overall:
+
+```python
+result = can_refresh(["sales.gold.v_orders", "sales.gold.v_revenue"])
+print(result.ready)                 # True only when every view is ready
+print(result.blockers())            # ('sales.silver.daily_sales',)
+print(result.to_dict())             # JSON, for a job log
 ```
 
 ```
-BLOCKED c.s.v_revenue   (window 24h)
-  stale c.s.daily_sales  MANAGED  last refresh 2026-10-05 04:01 IST  (60h 00m ago)  outside the 24h window
-  ok    c.s.orders       MANAGED  last refresh 2026-10-07 04:00 IST  (11h 00m ago)
+GATE  BLOCKED   2 views, window 24h, times Asia/Kolkata
 
-GATE RESULT  BLOCKED   1 of 2 views ready
+  READY   sales.gold.v_orders
+      fresh  sales.silver.daily_orders  (MANAGED)  last refresh 2026-10-07 04:00 IST (11h 48m ago)
+
+  BLOCKED sales.gold.v_revenue
+      fresh  sales.silver.orders        (MANAGED)  last refresh 2026-10-07 04:00 IST (11h 48m ago)
+      stale  sales.silver.daily_sales   (MANAGED)  last refresh 2026-10-05 04:00 IST (2d 11h ago) — older than the 24h window
+
+To unblock, refresh:
+  sales.silver.daily_sales   (needed by sales.gold.v_revenue)
 ```
 
-The gate decides; it never refreshes. It is read-only, like `analyze`. A
-function dependency in a view is a note, not a blocker. Everything else — a
-missing table, an unreadable history, a write outside the window — blocks,
-because the gate fails closed.
+The gate decides; it never refreshes. It is read-only, like `analyze`. The rules
+are the whole table:
+
+| Case | Verdict |
+|---|---|
+| Wrote inside the window | fresh |
+| Wrote before the window | stale — **blocks** |
+| No qualifying write in its history | **blocks** |
+| Cannot be read (missing, no permission) | **blocks** — the gate fails closed |
+| Streaming table | always fresh |
+| Materialized view | read from its pipeline event log |
+| Function dependency (a UDF) | a note, not a blocker |
+
+`Workspace(warehouse_id=...)` and `Config.fresh_hours` are optional. Without a
+`Workspace`, the gate reads `WAREHOUSE_ID` from the environment, so the
+one-liner above is enough inside a job.
 
 **Permissions.** The caller needs `SELECT` on each dependency (for
 `DESCRIBE HISTORY`) and `USE` on the catalogs and schemas involved. Materialized
 views are read through their pipeline event log, which by default only the
-pipeline's run-as user can read; without that access the MV lands in `skipped`
-rather than failing the run.
+pipeline's run-as user can read. Without that access the gate **blocks** the MV:
+it reports `history unreadable (permission)`. The call itself does not raise.
 
 ## Design docs
 
@@ -155,7 +178,7 @@ rather than failing the run.
 | [GENIE-PROMPT.md](GENIE-PROMPT.md) | Build prompt for Databricks Genie Code, phased with verification gates |
 
 Section 08 of the scheduler design lists what the docs describe but nobody
-built — read it before assuming a feature exists.
+built. The runtime gate is no longer on that list — it ships as `can_refresh`.
 
 ## The two things most likely to bite
 
@@ -174,6 +197,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-154 tests, all offline — no Spark session, no network, no credentials.
+165 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.
