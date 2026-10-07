@@ -23,6 +23,9 @@ class Skipped:
 
     name: str
     reason: str
+    #: True when the skip is a note, not a blocker — a function dependency has no
+    #: history to read, but it also has nothing to wait for.
+    benign: bool = False
 
 
 @dataclass(frozen=True)

@@ -94,6 +94,7 @@ def test_the_runtime_dependency_matches_requirements_txt():
 
 def test_the_package_still_exports_its_public_api():
     import view_scheduler
-    assert set(view_scheduler.__all__) == {"analyze", "Config", "Workspace"}
+    assert set(view_scheduler.__all__) == {
+        "analyze", "can_refresh", "Config", "GateResult", "Workspace"}
     for name in view_scheduler.__all__:
         assert getattr(view_scheduler, name) is not None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Iterable
 
 from .client import failure_category
@@ -15,6 +16,14 @@ MAX_DEPTH = 60
 #: Fetch one table's metadata as the raw API dict, or raise. Injected so the
 #: walk is testable with no network.
 Fetch = Callable[[str], dict]
+
+
+@dataclass(frozen=True)
+class GatingRef:
+    """A physical table that gates a view, with its Unity Catalog type."""
+
+    name: str
+    kind: str
 
 
 def _dependency_names(meta: dict) -> tuple[list[str], list[Skipped]]:
@@ -31,15 +40,21 @@ def _dependency_names(meta: dict) -> tuple[list[str], list[Skipped]]:
         function = dep.get("function") or {}
         fn_name = function.get("function_full_name")
         if fn_name:
-            skipped.append(Skipped(fn_name, "function dependency — no history to read"))
+            skipped.append(Skipped(
+                fn_name, "function dependency — no history to read", benign=True))
         else:
             skipped.append(Skipped(str(dep)[:80], "unrecognized dependency shape"))
     return names, skipped
 
 
-def walk(fqn: str, fetch: Fetch, max_depth: int = MAX_DEPTH) -> tuple[list[str], list[Skipped]]:
-    """Return (gating tables, skipped) for a view. Failures are recorded, not fatal."""
-    gating: list[str] = []
+def walk_refs(fqn: str, fetch: Fetch,
+              max_depth: int = MAX_DEPTH) -> tuple[list[GatingRef], list[Skipped]]:
+    """Return (gating tables with their kind, skipped) for a view.
+
+    View dependencies are followed; a physical table ends a branch. Failures are
+    recorded, not raised, so one unreadable node never aborts the walk.
+    """
+    gating: list[GatingRef] = []
     skipped: list[Skipped] = []
     seen: set[str] = set()
 
@@ -65,12 +80,19 @@ def walk(fqn: str, fetch: Fetch, max_depth: int = MAX_DEPTH) -> tuple[list[str],
             for child in names:
                 visit(child, depth + 1)
         elif kind in GATING:
-            gating.append(name)
+            gating.append(GatingRef(name, kind))
         else:
             skipped.append(Skipped(name, f"not readable as a Delta table (type {kind})"))
 
     visit(fqn, 0)
     return gating, skipped
+
+
+def walk(fqn: str, fetch: Fetch,
+         max_depth: int = MAX_DEPTH) -> tuple[list[str], list[Skipped]]:
+    """Return (gating table names, skipped). Names only; see walk_refs for kinds."""
+    refs, skipped = walk_refs(fqn, fetch, max_depth)
+    return [ref.name for ref in refs], skipped
 
 
 def _reason(exc: Exception) -> str:
