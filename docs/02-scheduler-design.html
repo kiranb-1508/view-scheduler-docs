@@ -205,7 +205,7 @@ td code{background:transparent;padding:0;font-size:.83em}
           <line x1="360" y1="550" x2="360" y2="568" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah2)"/>
 
           <rect x="160" y="570" width="400" height="34" fill="none" stroke="#1E6F8C" stroke-width="1.8"/>
-          <text x="360" y="592" text-anchor="middle" font-size="12" font-weight="600">safe = max + buffer&#160;&#160;·&#160;&#160;tighter = 2nd max + buffer</text>
+          <text x="360" y="592" text-anchor="middle" font-size="12" font-weight="600">safe = max + buffer&#160;&#160;·&#160;&#160;earlier = 2nd max + buffer</text>
         </g>
       </svg>
     </div>
@@ -303,8 +303,8 @@ def recommend(tables, buffer_min=15):
     # that looks entirely plausible.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe = ordered[-1] + buffer_min
-    tighter = ordered[-2] + buffer_min if len(ordered) &gt;= 2 else safe
-    return safe, tighter, len(days)</code></pre>
+    earlier = ordered[-2] + buffer_min if len(ordered) &gt;= 2 else safe
+    return safe, earlier, len(days)</code></pre>
   <div class="note warn">
     <span class="tag">Watch the midnight rollover</span>
     <p>Adding the buffer can push the time past midnight: a 23:50 all-clear plus 15 minutes is <strong>00:05 the next day</strong>. Returning the bare clock time loses that, and <code>00:05</code> read as a same-day schedule runs roughly 24 hours early — before any dependency has refreshed. The code carries a <code>safe_next_day</code> flag and the report prints <code>(+1 day)</code> plus a warning.</p>
@@ -331,9 +331,9 @@ def recommend(tables, buffer_min=15):
   <p>Sort those five all-clear times worst-first: <code>06:10, 05:30, 04:10, 04:00, 04:00</code>. Then:</p>
   <ul>
     <li><strong>safe</strong> = worst + 15 min = <strong>06:25</strong> — would have worked on all five days.</li>
-    <li><strong>tighter</strong> = second-worst + 15 min = <strong>05:45</strong> — 40 minutes earlier, but Wednesday would have failed.</li>
+    <li><strong>earlier</strong> = second-worst + 15 min = <strong>05:45</strong> — 40 minutes earlier, but Wednesday would have failed.</li>
   </ul>
-  <p>Over 30 days rather than 5, "tighter" fails roughly one day a month. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
+  <p>Over 30 days rather than 5, the earlier time fails roughly one day a month. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
 </section>
 
 <hr>
@@ -342,7 +342,7 @@ def recommend(tables, buffer_min=15):
   <h2><span class="num">06</span>Config and output</h2>
   <p>Four parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST), and <code>fresh_hours</code> (24 — the gate's rolling window).</p>
   <p><strong>Timestamps are read as epochs, not as rendered strings.</strong> A Databricks <code>TIMESTAMP</code> renders in the warehouse's session timezone, and the Statement Execution API appends a <code>Z</code> suffix whose accuracy therefore depends on warehouse configuration this tool does not control. Selecting <code>unix_timestamp(timestamp)</code> sidesteps the question entirely — an epoch is the same instant however the session renders it. The single <code>timezone</code> parameter then decides which local day each instant falls on, which is the only place a timezone should matter.</p>
-  <p>The report carries: the two times, the per-dependency table (<code>REFRESHES / USUAL / WORST / DAYS / MISSED</code>), the day-by-day all-clear series behind those two numbers, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
+  <p>The report carries: the two times, the per-dependency table (<code>RUNS / USUAL / LATEST / DAYS / MISSED</code>), the day-by-day finish list behind those two times, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
 </section>
 
 <hr>

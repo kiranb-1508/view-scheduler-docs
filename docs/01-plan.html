@@ -37,31 +37,31 @@ td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
   <p>This is the deliverable. If a junior engineer can read this at 3am and act, we're done.</p>
   <div class="screen">
 <pre><code>VIEW   sales_gold.customer_360
-       8 dependencies · 30 days history · times IST
+       8 dependencies · last 30 days · times IST
 
-       START AT 05:45   safe — later than all 30 days
-       or       05:20   tighter — would have been early on 1 day in 30
+       SCHEDULE AT  05:45    safe — every job had finished, on all 30 days
+       EARLIER      05:20    one job had not finished yet, on 1 of 30 days
 
-DEPENDENCY          REFRESHES  USUAL   WORST   DAYS  MISSED
-bronze.orders       daily      04:12   05:30   30    0
-bronze.customers    daily      03:50   04:05   30    0
-bronze.payments     daily      04:40   05:28   30    0
-silver.fx_rates     daily      02:15   02:40   28    2
-silver.products     Mons       06:20   06:45   4     0
-silver.geo          daily      03:05   03:22   30    0
-gold.segments       daily      05:01   05:31   30    0
-gold.ltv            daily      04:55   05:12   30    0
+DEPENDENCY        RUNS   USUAL   LATEST  DAYS  MISSED
+bronze.orders     daily  04:12   05:30   30    0
+bronze.customers  daily  03:50   04:05   30    0
+bronze.payments   daily  04:40   05:28   30    0
+silver.fx_rates   daily  02:15   02:40   28    2
+silver.products   Mons   06:20   06:45   4     0
+silver.geo        daily  03:05   03:22   30    0
+gold.segments     daily  05:01   05:31   30    0
+gold.ltv          daily  04:55   05:12   30    0
 
-ALL-CLEAR BY DAY   (when the last dependency finished; latest first)
-  2026-08-17  Mon  06:45  ← sets safe
-  2026-08-24  Mon  06:20  ← sets tighter
+WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)
+  2026-08-17  Mon  06:45   ← sets the safe time
+  2026-08-24  Mon  06:20   ← sets the earlier time
   2026-08-10  Mon  06:05
   2026-08-06  Thu  05:31
   ... 26 more
 
-!  silver.fx_rates missed 2 of 30 observed days — no schedule time fixes that
-!  silver.products refreshes Mons only → it will not be fresh on other days
-!  1 dependency skipped:
+!  silver.fx_rates did not run on 2 of 30 days — no schedule time fixes that
+!  silver.products runs only on Mons — it will not be fresh on other days
+!  1 dependency could not be read:
      ext.crm_sync — not readable as a Delta table (type FOREIGN)</code></pre>
   </div>
   <p>No confidence tiers, no coverage percentages, no vocabulary anyone has to learn. <strong>"Worst day in 30"</strong> and <strong>"worst but one"</strong> are the same two order statistics from v3 — just said in words a person already knows.</p>

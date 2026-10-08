@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -83,6 +84,16 @@ class Workspace:
                 chunk = page.next_chunk_index
 
             return [dict(zip(columns, row)) for row in rows]
+
+
+def workspace_from_env() -> "Workspace":
+    """Build a Workspace from $WAREHOUSE_ID, or say exactly what is missing."""
+    warehouse = os.environ.get("WAREHOUSE_ID")
+    if not warehouse:
+        raise ValueError(
+            "no warehouse: pass Workspace(warehouse_id='...') "
+            "or set the WAREHOUSE_ID environment variable")
+    return Workspace(warehouse_id=warehouse)
 
 
 def failure_category(exc: Exception) -> str:

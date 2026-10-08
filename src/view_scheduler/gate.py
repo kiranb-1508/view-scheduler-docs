@@ -26,13 +26,12 @@ we cannot read blocks the view, because the gate fails closed.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .client import Workspace, failure_category, read_latest_commit
+from .client import Workspace, failure_category, read_latest_commit, workspace_from_env
 from .config import DEFAULT, Config
 from .walker import walk_refs
 
@@ -172,7 +171,7 @@ def can_refresh(
     cutoff = moment - timedelta(hours=window)
     not_after = int(moment.timestamp())
 
-    workspace = ws or _default_workspace()
+    workspace = ws or workspace_from_env()
 
     # Shared across the whole call: a table two views depend on is read once,
     # and a failure is remembered rather than retried for every view.
@@ -223,15 +222,6 @@ def can_refresh(
     if not quiet:
         print(outcome)
     return outcome
-
-
-def _default_workspace() -> Workspace:
-    warehouse = os.environ.get("WAREHOUSE_ID")
-    if not warehouse:
-        raise ValueError(
-            "no warehouse: pass Workspace(warehouse_id='...') "
-            "or set the WAREHOUSE_ID environment variable")
-    return Workspace(warehouse_id=warehouse)
 
 
 def _measure(ref, latest, cutoff: datetime, moment: datetime,

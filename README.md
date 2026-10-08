@@ -1,19 +1,18 @@
 # View Materialization Scheduler
 
-Answers: *given a Unity Catalog view, what is the earliest time each day its
-materialization can be scheduled so every dependency has refreshed?*
+Two questions, two tools.
 
-Two questions, two tools. `analyze` answers **when** to schedule, from history.
-The gate, `can_refresh`, answers **whether** a view can refresh right now.
+- **When** should this view run? → `advise`. It reads history and suggests a time.
+- **Can** it run right now? → `can_refresh`, the gate. It checks today's state.
 
 ```
 $ view-scheduler sales_gold.customer_360
 
 VIEW   sales_gold.customer_360
-       8 dependencies · 30 days history · times Asia/Kolkata
+       8 dependencies · last 30 days · times Asia/Kolkata
 
-       START AT 06:25   safe — later than all 30 days
-       or       05:45   tighter — would have been early on 1 day in 30
+       SCHEDULE AT  06:25    safe — every job had finished, on all 30 days
+       EARLIER      05:45    one job had not finished yet, on 1 of 30 days
 ```
 
 ## Read this before you rely on it
@@ -26,7 +25,7 @@ refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
-commit history. Until that completes, treat output as indicative. Hence `0.2.0`.
+commit history. Until that completes, treat output as indicative. Hence `0.3.0`.
 
 ## Install
 
@@ -46,7 +45,7 @@ Build and upload a release:
 
 ```bash
 python -m build --wheel
-databricks fs cp dist/view_scheduler-0.2.0-py3-none-any.whl \
+databricks fs cp dist/view_scheduler-0.3.0-py3-none-any.whl \
   dbfs:/Volumes/<catalog>/<schema>/libs/
 ```
 
@@ -55,7 +54,7 @@ Keep old versions in the volume so running jobs can stay pinned.
 Then, in a notebook:
 
 ```python
-%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.2.0-py3-none-any.whl
+%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.3.0-py3-none-any.whl
 dbutils.library.restartPython()
 ```
 
@@ -65,7 +64,7 @@ Or as a job library, including from a DAB:
 tasks:
   - task_key: recommend
     libraries:
-      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.2.0-py3-none-any.whl
+      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.3.0-py3-none-any.whl
 ```
 
 ### From source
@@ -90,16 +89,22 @@ view-scheduler catalog.schema.my_view --days 60 --buffer 30 --quiet
 As a library:
 
 ```python
-from view_scheduler import analyze, Config, Workspace
+from view_scheduler import advise
 
-ws = Workspace(warehouse_id="...")
-text, histories, skipped = analyze("catalog.schema.my_view", ws, Config())
-print(text)
+advice = advise("sales.gold.customer_360")   # WAREHOUSE_ID from the env
+advice.safe_time      # datetime.time(6, 25)  or None
+advice.earlier_time   # datetime.time(5, 45)  or None
+advice.next_day       # True when the (+1 day) marker applies
+advice.dependencies   # one row per upstream job
+advice.to_dict()      # JSON, for a job log
+print(advice)         # the report
 ```
 
-`analyze` returns the rendered report, the per-table history objects, and
-anything that could not be read. Nothing is ever dropped silently — an
-unreadable dependency comes back in `skipped` with a reason.
+`advise` prints the report and returns an `Advice`. Nothing is dropped
+silently — anything unreadable comes back in `advice.unreadable` with a reason.
+
+`analyze` is the low-level call. It returns a tuple
+`(text, histories, skipped)` for code that needs the raw per-table history.
 
 Four settings: `days_history` (30), `buffer_min` (15), `timezone`
 (`Asia/Kolkata`), and `fresh_hours` (24) — the gate's window. There is a
@@ -197,6 +202,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-165 tests, all offline — no Spark session, no network, no credentials.
+174 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.

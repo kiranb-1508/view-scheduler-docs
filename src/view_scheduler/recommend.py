@@ -36,7 +36,7 @@ class DependencyRow:
 @dataclass(frozen=True)
 class Recommendation:
     safe: time | None           # worst all-clear + buffer
-    tighter: time | None        # second-worst all-clear + buffer
+    earlier: time | None        # second-worst all-clear + buffer
     n_days: int                 # days where every dependency refreshed
     span_days: int = 0          # observed span the `missed` counts are over
     rows: list[DependencyRow] = field(default_factory=list)
@@ -45,7 +45,7 @@ class Recommendation:
     # belongs to the following calendar day. Without this the clock time alone
     # reads ~24h earlier than meant.
     safe_next_day: bool = False
-    tighter_next_day: bool = False
+    earlier_next_day: bool = False
 
 
 def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
@@ -135,7 +135,7 @@ def observed_span(histories: Sequence[TableHistory]) -> list[date]:
 
 
 def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendation:
-    """Compute safe/tighter times from the intersection of all dependencies' refresh days."""
+    """Compute safe/earlier times from the intersection of all dependencies' refresh days."""
     histories = list(histories)
     if not histories:
         return Recommendation(None, None, 0, 0, [], {})
@@ -157,11 +157,11 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe, safe_next = _plus(ordered[-1], buffer_min)
     if len(ordered) >= 2:
-        tighter, tighter_next = _plus(ordered[-2], buffer_min)
+        earlier, earlier_next = _plus(ordered[-2], buffer_min)
     else:
-        tighter, tighter_next = safe, safe_next
-    return Recommendation(safe, tighter, len(common), len(span), rows, all_clear,
-                          safe_next, tighter_next)
+        earlier, earlier_next = safe, safe_next
+    return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
+                          safe_next, earlier_next)
 
 
 def _plus(moment: datetime, minutes: int) -> tuple[time, bool]:

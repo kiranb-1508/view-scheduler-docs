@@ -1,5 +1,5 @@
 """Phase 3 gate. The anchor is the worked example the design spec states
-outright: safe 06:25, tighter 05:45, buffer 15."""
+outright: safe 06:25, earlier 05:45, buffer 15."""
 
 from datetime import date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -34,7 +34,7 @@ def test_the_worked_example_from_the_design_spec():
     assert [t.strftime("%H:%M") for t in ordered] == \
         ["04:00", "04:00", "04:10", "05:30", "06:10"]
     assert result.safe == time(6, 25)
-    assert result.tighter == time(5, 45)
+    assert result.earlier == time(5, 45)
     assert result.n_days == 5
 
 
@@ -91,11 +91,11 @@ def test_no_overlapping_days_yields_no_recommendation_rather_than_a_wrong_one():
     assert len(result.rows) == 2, "the evidence is still reported"
 
 
-def test_single_day_of_history_makes_tighter_equal_safe():
+def test_single_day_of_history_makes_earlier_equal_safe():
     one = history("a", ["04:00", None, None, None, None])
     two = history("b", ["04:30", None, None, None, None])
     result = recommend([one, two], buffer_min=15)
-    assert result.safe == time(4, 45) and result.tighter == time(4, 45)
+    assert result.safe == time(4, 45) and result.earlier == time(4, 45)
 
 
 def test_usual_is_the_median_and_worst_is_the_max():
@@ -125,12 +125,12 @@ def test_buffer_crossing_midnight_is_flagged_not_silently_wrapped():
 def test_a_normal_time_is_not_marked_next_day():
     result = recommend([ORDERS, CUSTOMERS], buffer_min=15)
     assert result.safe == time(6, 25)
-    assert not result.safe_next_day and not result.tighter_next_day
+    assert not result.safe_next_day and not result.earlier_next_day
 
 
 def test_only_the_wrapping_number_is_marked():
-    """safe wraps, tighter does not — the flags are independent."""
+    """safe wraps, earlier does not — the flags are independent."""
     a = history("a", ["23:50", "20:00", "20:00", "20:00", "20:00"])
     result = recommend([a], buffer_min=15)
     assert result.safe == time(0, 5) and result.safe_next_day
-    assert result.tighter == time(20, 15) and not result.tighter_next_day
+    assert result.earlier == time(20, 15) and not result.earlier_next_day
