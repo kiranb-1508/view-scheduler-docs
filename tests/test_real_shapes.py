@@ -9,8 +9,8 @@ actually occur.
 
 from datetime import timezone
 
-from scheduler.history import classify, qualifying
-from scheduler.models import Commit
+from view_scheduler.history import classify, qualifying
+from view_scheduler.models import Commit
 from tests import fixtures as f
 
 UTC = timezone.utc

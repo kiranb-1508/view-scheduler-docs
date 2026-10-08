@@ -43,7 +43,7 @@ def test_no_two_jobs_share_a_cron():
 
 
 def test_bundle_timezone_matches_the_config():
-    from scheduler.config import DEFAULT
+    from view_scheduler.config import DEFAULT
     text = BUNDLE.read_text()
     zones = set(re.findall(r'timezone_id:\s*(\S+)', text))
     assert zones == {DEFAULT.timezone}, (

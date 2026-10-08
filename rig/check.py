@@ -20,11 +20,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import oracle  # noqa: E402
 import plan  # noqa: E402
-from scheduler import obs  # noqa: E402
-from scheduler.client import Workspace  # noqa: E402
-from scheduler.config import Config  # noqa: E402
-from scheduler.recommend import recommend  # noqa: E402
-from scheduler.run import _read, analyze  # noqa: E402
+from view_scheduler import obs  # noqa: E402
+from view_scheduler.client import Workspace  # noqa: E402
+from view_scheduler.config import Config  # noqa: E402
+from view_scheduler.recommend import recommend  # noqa: E402
+from view_scheduler.run import _read, analyze  # noqa: E402
 
 CONFIG = Config()
 

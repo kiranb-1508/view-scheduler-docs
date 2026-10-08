@@ -30,16 +30,22 @@ class DependencyRow:
     degraded: bool = False
     continuous: bool = False        # refreshed many times a day; finish is a floor
     outlier_day: date | None = None # the day that pins `worst`, if it is an outlier
+    unknown_ops: tuple = ()         # operation names we could not classify
 
 
 @dataclass(frozen=True)
 class Recommendation:
     safe: time | None           # worst all-clear + buffer
-    tighter: time | None        # second-worst all-clear + buffer
+    earlier: time | None        # second-worst all-clear + buffer
     n_days: int                 # days where every dependency refreshed
     span_days: int = 0          # observed span the `missed` counts are over
     rows: list[DependencyRow] = field(default_factory=list)
     all_clear: dict = field(default_factory=dict)   # date -> datetime
+    # True when adding the buffer pushed the time past midnight, so the run
+    # belongs to the following calendar day. Without this the clock time alone
+    # reads ~24h earlier than meant.
+    safe_next_day: bool = False
+    earlier_next_day: bool = False
 
 
 def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
@@ -85,6 +91,7 @@ def build_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[
             degraded=history.metrics_degraded,
             continuous=history.continuous,
             outlier_day=_outlier_day(history.finish_times, usual, worst),
+            unknown_ops=history.unknown_ops,
         ))
     return rows
 
@@ -128,7 +135,7 @@ def observed_span(histories: Sequence[TableHistory]) -> list[date]:
 
 
 def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendation:
-    """Compute safe/tighter times from the intersection of all dependencies' refresh days."""
+    """Compute safe/earlier times from the intersection of all dependencies' refresh days."""
     histories = list(histories)
     if not histories:
         return Recommendation(None, None, 0, 0, [], {})
@@ -148,10 +155,20 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     }
     # Sort by clock time, not datetime — latest time of day, not most recent date.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
-    safe = _plus(ordered[-1], buffer_min)
-    tighter = _plus(ordered[-2], buffer_min) if len(ordered) >= 2 else safe
-    return Recommendation(safe, tighter, len(common), len(span), rows, all_clear)
+    safe, safe_next = _plus(ordered[-1], buffer_min)
+    if len(ordered) >= 2:
+        earlier, earlier_next = _plus(ordered[-2], buffer_min)
+    else:
+        earlier, earlier_next = safe, safe_next
+    return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
+                          safe_next, earlier_next)
 
 
-def _plus(moment: datetime, minutes: int) -> time:
-    return (moment + timedelta(minutes=minutes)).time()
+def _plus(moment: datetime, minutes: int) -> tuple[time, bool]:
+    """Add the buffer, reporting whether it crossed midnight.
+
+    The caller needs the rollover: a 23:50 all-clear plus a 15-minute buffer is
+    00:05 *the next day*, and the bare clock time reads as a day earlier.
+    """
+    shifted = moment + timedelta(minutes=minutes)
+    return shifted.time(), shifted.date() != moment.date()

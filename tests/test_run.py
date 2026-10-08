@@ -9,8 +9,8 @@ with no network.
 from datetime import date, timezone
 
 from conftest import FakeWorkspace
-from scheduler.config import Config
-from scheduler.run import _reason, analyze
+from view_scheduler.config import Config
+from view_scheduler.run import _reason, analyze
 from tests import fixtures as f
 
 UTC = timezone.utc
@@ -38,8 +38,8 @@ def test_analyze_reads_a_managed_table_and_a_materialized_view_dependency():
     ws = FakeWorkspace(
         tables=tables,
         history={"c.s.t": daily_overwrite("2026-08-06", "04:00")},
-        mv_events={"c.s.mv": [{"timestamp": "2026-08-06T04:30:00.000Z",
-                               "state": "COMPLETED"}]},
+        mv_events={"c.s.mv": [
+            {"ts_epoch": str(int(f.at("2026-08-06", "04:30").timestamp()))}]},
         # An MV rejects DESCRIBE HISTORY; _read must catch this and fall back.
         history_errors={"c.s.mv": RuntimeError(
             "[EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE] expects a table")},

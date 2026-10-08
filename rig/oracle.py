@@ -22,8 +22,8 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import plan
-from scheduler.models import TableHistory
-from scheduler.recommend import Recommendation, recommend
+from view_scheduler.models import TableHistory
+from view_scheduler.recommend import Recommendation, recommend
 
 TZ = ZoneInfo("Asia/Kolkata")
 
@@ -86,9 +86,9 @@ def mismatches(expected: Recommendation, actual: Recommendation,
     if not _within(actual.safe, expected.safe, tolerance_min):
         out.append(f"safe: expected {expected.safe} (+{tolerance_min}m), "
                    f"got {actual.safe}")
-    if not _within(actual.tighter, expected.tighter, tolerance_min):
-        out.append(f"tighter: expected {expected.tighter} (+{tolerance_min}m), "
-                   f"got {actual.tighter}")
+    if not _within(actual.earlier, expected.earlier, tolerance_min):
+        out.append(f"earlier: expected {expected.earlier} (+{tolerance_min}m), "
+                   f"got {actual.earlier}")
 
     by_name = {short.get(r.name, r.name): r for r in actual.rows}
     for row in expected.rows:

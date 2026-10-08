@@ -62,7 +62,7 @@ class Write:
     def qualifies(self) -> bool:
         """Whether the scheduler should count this as a refresh.
 
-        Mirrors the rule in scheduler.history: any write counts — a full replace
+        Mirrors the rule in view_scheduler.history: any write counts — a full replace
         or an incremental — regardless of row count. A zero-row append still
         means the pipeline ran that day. Only the metadata-only TOUCH is not a
         refresh.
@@ -115,8 +115,10 @@ def writes_for(slot: str, day: date) -> list[Write]:
     if slot == "04:00":
         out.append(Write("t_daily_tight", OVERWRITE, 100))
         out.append(Write("t_daily_append", APPEND, 10))
-        # Zero rows on a third of days. The append must not qualify; the
-        # overwrite must, and that asymmetry is the whole test.
+        # Zero rows on a third of days, for both the append and the overwrite.
+        # Both must still qualify: a zero-row write means the pipeline ran on a
+        # quiet day. The pair proves the row count does not change the verdict,
+        # only the class.
         zero = die("t_zero", day) % 3 == 0
         out.append(Write("t_append_zero", APPEND, 0 if zero else 10))
         out.append(Write("t_overwrite_zero", OVERWRITE, 0 if zero else 10))
@@ -158,7 +160,7 @@ def writes_for(slot: str, day: date) -> list[Write]:
 def expected_finishes(table: str) -> dict[date, str]:
     """{day: slot} — the first qualifying commit of each day, per the plan.
 
-    This is what scheduler.history.finish_times should reproduce from the real
+    This is what view_scheduler.history.finish_times should reproduce from the real
     commit log.
     """
     out: dict[date, str] = {}

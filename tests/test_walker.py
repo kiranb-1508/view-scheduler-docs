@@ -3,7 +3,7 @@ dependency, and a 403 that must not abort the walk."""
 
 import pytest
 
-from scheduler.walker import walk
+from view_scheduler.walker import walk
 from tests import fixtures as f
 
 

@@ -7,3 +7,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Packaging
+dist/
+build/
+*.egg-info/

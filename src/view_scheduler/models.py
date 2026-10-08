@@ -33,3 +33,4 @@ class TableHistory:
     finish_times: dict = field(default_factory=dict)   # date -> aware datetime
     metrics_degraded: bool = False
     continuous: bool = False       # refreshed many times a day; finish is a floor
+    unknown_ops: tuple = ()        # operation names we could not classify
