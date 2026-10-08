@@ -9,19 +9,19 @@
 # MAGIC `workspace.sched_rig`, which write on a known schedule, so you can check the
 # MAGIC answers against something you can reason about.
 # MAGIC
-# MAGIC > **Read first — the recommendation is advisory.** Nothing verifies at runtime
-# MAGIC > that dependencies actually refreshed. If one runs later than it ever has, a
-# MAGIC > job scheduled on this number starts anyway and publishes stale data,
-# MAGIC > silently. Treat the output as evidence for a decision, not a guarantee.
+# MAGIC > **Read first — the suggested time comes from history.** Nothing checks
+# MAGIC > today. If a job runs later than it ever has, work scheduled on this number
+# MAGIC > starts anyway and publishes stale data, silently. Treat the output as
+# MAGIC > evidence for a decision, not a guarantee. For a live check, use the gate.
 # MAGIC
 # MAGIC > **The fixture rig is on day 1 of 30.** Every table below currently has one
 # MAGIC > or two days of history, and the largest timestamp in the window is the
 # MAGIC > *setup* commit from the day the rig was created (~16:43 IST), not a
-# MAGIC > scheduled run. So most views here report `safe 16:58` — pinned by setup,
+# MAGIC > scheduled run. So most views here report `SCHEDULE AT 16:58` — pinned by setup,
 # MAGIC > not by the pipeline. That is a real property of the current data, not a
 # MAGIC > bug, and it is worth seeing: it shows exactly how a single unrepresentative
 # MAGIC > commit drags the recommendation, and why the `DAYS` column and the
-# MAGIC > `ALL-CLEAR BY DAY` block matter more than the headline number when
+# MAGIC > `WHEN THE LAST JOB FINISHED` block matter more than the headline time when
 # MAGIC > evidence is thin. Re-run this in a week for a realistic picture.
 
 # COMMAND ----------
@@ -34,7 +34,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.2.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.3.0-py3-none-any.whl
 
 # COMMAND ----------
 
@@ -80,20 +80,20 @@ print(text)
 # MAGIC
 # MAGIC | Column | Meaning |
 # MAGIC |---|---|
-# MAGIC | `REFRESHES` | Which weekdays it was seen refreshing — observed, not declared |
+# MAGIC | `RUNS` | Which weekdays it was seen running — observed, not declared |
 # MAGIC | `USUAL` | Median finish time |
-# MAGIC | `WORST` | Latest finish **time of day** — often not the most recent date |
+# MAGIC | `LATEST` | Latest finish **time of day** — often not the most recent date |
 # MAGIC | `DAYS` | How many days it actually refreshed in the window |
 # MAGIC | `MISSED` | Days it was expected to run and didn't |
 # MAGIC
-# MAGIC `safe` is the worst all-clear plus the buffer — it would have worked on every
-# MAGIC day observed. `tighter` is the second-worst: earlier, but it would have been
-# MAGIC too early on one day. **Going early means publishing stale data**, so prefer
-# MAGIC `safe` unless you have a specific reason not to.
+# MAGIC `SCHEDULE AT` is the latest finish in the period plus a small gap. It would
+# MAGIC have worked on every day observed. `EARLIER` is the second latest: a bit
+# MAGIC sooner, but one job had not finished yet on one day. **Starting early means
+# MAGIC publishing stale data**, so prefer the safe time unless you have a reason.
 # MAGIC
-# MAGIC The `ALL-CLEAR BY DAY` block is the evidence behind those two numbers — it
-# MAGIC names the day that set each one, so a surprising recommendation can be traced
-# MAGIC to the day that caused it rather than taken on faith.
+# MAGIC The `WHEN THE LAST JOB FINISHED` block is the evidence behind those two times —
+# MAGIC it names the day that set each one, so a surprising answer can be traced to
+# MAGIC the day that caused it rather than taken on faith.
 
 # COMMAND ----------
 
@@ -143,10 +143,10 @@ print(text)
 # MAGIC miss days it was never expected to run. The signals that matter:
 # MAGIC
 # MAGIC * **`DAYS 1`** — one day of evidence behind that time.
-# MAGIC * **`refreshes Mons only`** — the cadence was inferred from a single
+# MAGIC * **`runs only on Mons`** — the pattern was inferred from a single
 # MAGIC   observation that happened to fall on a Monday.
-# MAGIC * **the weak-evidence warning**, which names the starving dependency.
-# MAGIC * **`ALL-CLEAR BY DAY`**, showing the single day the whole number rests on.
+# MAGIC * **the weak-advice warning**, which names the dependency with the fewest days.
+# MAGIC * **`WHEN THE LAST JOB FINISHED`**, showing the single day the time rests on.
 # MAGIC
 # MAGIC Read `MISSED` next to `DAYS` or you will read it wrong. This is the honest
 # MAGIC failure mode of a 30-day statistic computed on day 1, and the report's job is
@@ -275,7 +275,7 @@ for view in views:
         rows.append({
             "view": view,
             "safe": str(result.safe) if result.safe else None,
-            "tighter": str(result.tighter) if result.tighter else None,
+            "earlier": str(result.earlier) if result.earlier else None,
             "next_day": result.safe_next_day,
             "days_of_evidence": result.n_days,
             "dependencies": len(result.rows),
@@ -354,7 +354,7 @@ print(text)
 # MAGIC The same thing without a notebook:
 # MAGIC
 # MAGIC ```bash
-# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.2.0-py3-none-any.whl
+# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.3.0-py3-none-any.whl
 # MAGIC export WAREHOUSE_ID=f96bd3430e175166
 # MAGIC view-scheduler workspace.sched_rig.v_realistic
 # MAGIC view-scheduler workspace.sched_rig.v_healthy --days 60 --buffer 30 --quiet

@@ -50,15 +50,15 @@ def history_from_plan(table: str) -> TableHistory:
 
 # --- the behaviours the roster was built to prove ----------------------------
 
-def test_late_tail_pushes_safe_out_and_leaves_tighter_behind():
-    """The two 06:10 days are why safe and tighter differ at all. Without them
+def test_late_tail_pushes_safe_out_and_leaves_earlier_behind():
+    """The two 06:10 days are why safe and earlier differ at all. Without them
     every day finishes at 04:00 and the two numbers collapse together."""
     result = recommend([history_from_plan("t_daily_late_tail")], BUFFER)
     assert result.safe == time(6, 25)
-    assert result.tighter == time(6, 25), "two late days, so second-worst is also late"
+    assert result.earlier == time(6, 25), "two late days, so second-worst is also late"
 
     tight = recommend([history_from_plan("t_daily_tight")], BUFFER)
-    assert tight.safe == tight.tighter == time(4, 15)
+    assert tight.safe == tight.earlier == time(4, 15)
 
 
 def test_a_weekly_dependency_hides_the_other_tables_bad_days():
@@ -100,7 +100,7 @@ def test_broken_view_refuses_to_invent_a_time():
     result = recommend(histories, BUFFER)
     text = render("v_broken", result, [], "Asia/Kolkata")
     assert result.safe is None
-    assert "NO RECOMMENDATION" in text and "START AT" not in text
+    assert "NO TIME TO SUGGEST" in text and "SCHEDULE AT" not in text
 
 
 def test_midnight_view_keeps_both_sides_of_the_boundary_on_their_own_days():
