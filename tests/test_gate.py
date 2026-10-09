@@ -33,6 +33,12 @@ def optimize(hours_ago, version=0):
                              {"numRemovedFiles": "3"})
 
 
+def streaming_update(hours_ago, version=0):
+    """A streaming table's scheduled refresh, as DESCRIBE HISTORY returns it."""
+    return f.raw_history_row(version, ago(hours_ago), "STREAMING UPDATE",
+                             {}, {"numOutputRows": "50"})
+
+
 def run(views, ws, **kwargs):
     kwargs.setdefault("now", NOW)
     kwargs.setdefault("quiet", True)
@@ -156,15 +162,51 @@ def test_root_view_not_found_blocks():
 
 # --- special object types ----------------------------------------------------
 
-def test_streaming_table_is_always_fresh_and_its_history_is_not_read():
+def test_streaming_table_is_checked_from_its_history_like_a_table():
+    """A scheduled streaming table is stale between runs, so it is checked.
+
+    The rig's own st_stream went 24 days without a commit (2026-09-13 to
+    2026-10-07). The old "always fresh" rule called it fresh through all of
+    them. Verified live: DESCRIBE HISTORY works on a streaming table, and its
+    refreshes are STREAMING UPDATE commits.
+    """
+    fresh = FakeWorkspace(
+        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.st"]),
+                "c.s.st": f.uc_table("c.s.st", table_type="STREAMING_TABLE")},
+        history={"c.s.st": [streaming_update(5)]})
+    result = run("c.s.v", fresh)
+    assert result.ready is True
+    assert dep(result).kind == "STREAMING_TABLE"
+    assert dep(result).last_refresh == ago(5)
+    assert "c.s.st" in fresh.sql_calls, "a streaming table's history is read"
+
+    stale = FakeWorkspace(
+        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.st"]),
+                "c.s.st": f.uc_table("c.s.st", table_type="STREAMING_TABLE")},
+        history={"c.s.st": [streaming_update(30)]})
+    result = run("c.s.v", stale)
+    assert result.ready is False, "a scheduled streaming table goes stale between runs"
+    assert "older than the 24h window" in dep(result).detail
+
+
+def test_streaming_table_with_no_history_blocks():
     ws = FakeWorkspace(
         tables={"c.s.v": f.uc_view("c.s.v", ["c.s.st"]),
                 "c.s.st": f.uc_table("c.s.st", table_type="STREAMING_TABLE")},
         history={})
     result = run("c.s.v", ws)
-    assert result.ready is True
-    assert dep(result).kind == "STREAMING_TABLE"
-    assert "c.s.st" not in ws.sql_calls, "a streaming table's history is never read"
+    assert result.ready is False
+    assert "no qualifying refresh" in dep(result).detail
+
+
+def test_streaming_table_whose_history_is_unreadable_blocks():
+    ws = FakeWorkspace(
+        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.st"]),
+                "c.s.st": f.uc_table("c.s.st", table_type="STREAMING_TABLE")},
+        history_errors={"c.s.st": RuntimeError("User does not have permission")})
+    result = run("c.s.v", ws)
+    assert result.ready is False, "an unreadable streaming table fails closed"
+    assert "history unreadable" in dep(result).detail
 
 
 def test_materialized_view_reads_its_event_log():

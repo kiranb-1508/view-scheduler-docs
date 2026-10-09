@@ -25,7 +25,7 @@ refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
-commit history. Until that completes, treat output as indicative. Hence `0.3.0`.
+commit history. Until that completes, treat output as indicative. Hence `0.4.0`.
 
 ## Install
 
@@ -45,7 +45,7 @@ Build and upload a release:
 
 ```bash
 python -m build --wheel
-databricks fs cp dist/view_scheduler-0.3.0-py3-none-any.whl \
+databricks fs cp dist/view_scheduler-0.4.0-py3-none-any.whl \
   dbfs:/Volumes/<catalog>/<schema>/libs/
 ```
 
@@ -54,7 +54,7 @@ Keep old versions in the volume so running jobs can stay pinned.
 Then, in a notebook:
 
 ```python
-%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.3.0-py3-none-any.whl
+%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.4.0-py3-none-any.whl
 dbutils.library.restartPython()
 ```
 
@@ -64,7 +64,7 @@ Or as a job library, including from a DAB:
 tasks:
   - task_key: recommend
     libraries:
-      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.3.0-py3-none-any.whl
+      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.4.0-py3-none-any.whl
 ```
 
 ### From source
@@ -158,7 +158,7 @@ are the whole table:
 | Wrote before the window | stale — **blocks** |
 | No qualifying write in its history | **blocks** |
 | Cannot be read (missing, no permission) | **blocks** — the gate fails closed |
-| Streaming table | always fresh |
+| Streaming table | checked from its history, like any table — one on a schedule is stale between runs |
 | Materialized view | read from its pipeline event log |
 | Function dependency (a UDF) | a note, not a blocker |
 
@@ -203,6 +203,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-174 tests, all offline — no Spark session, no network, no credentials.
+176 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.

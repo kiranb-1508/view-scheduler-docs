@@ -11,9 +11,11 @@ READ ONLY, and DECIDE ONLY. The gate never refreshes anything. It answers one
 question, and the calling job acts on the answer.
 
 A dependency is fresh when it has a qualifying write within the last
-`Config.fresh_hours` hours (default 24). A streaming table is fresh by
-definition. A materialized view is read from its pipeline event log. Anything
-we cannot read blocks the view, because the gate fails closed.
+`Config.fresh_hours` hours (default 24). A streaming table is checked like
+any table: it is a Delta table, its history is readable, and one on a
+schedule is stale between runs. A materialized view is read from its pipeline
+event log. Anything we cannot read blocks the view, because the gate fails
+closed.
 
     from view_scheduler import can_refresh
 
@@ -201,12 +203,8 @@ def can_refresh(
     results: list[ViewResult] = []
     for view in names:
         refs, blockers, notes = walk_refs(view, fetch_meta)
-        deps = [
-            _measure(ref, None, cutoff, moment, window)
-            if ref.kind == "STREAMING_TABLE"
-            else _measure(ref, latest_write(ref.name), cutoff, moment, window)
-            for ref in refs
-        ]
+        deps = [_measure(ref, latest_write(ref.name), cutoff, moment, window)
+                for ref in refs]
         deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
                  for item in blockers]
         deps += [Dependency(item.name, "FUNCTION", True, detail=item.reason)
@@ -226,10 +224,14 @@ def can_refresh(
 
 def _measure(ref, latest, cutoff: datetime, moment: datetime,
              window: int) -> Dependency:
-    """Turn one dependency's newest qualifying write into a fresh/stale verdict."""
-    if ref.kind == "STREAMING_TABLE":
-        return Dependency(ref.name, ref.kind, True,
-                          detail="streaming table — always fresh")
+    """Turn one dependency's newest qualifying write into a fresh/stale verdict.
+
+    A streaming table goes through the same check as a managed table. A
+    streaming table on a schedule commits once per run, so between runs it is
+    stale, and a paused one is stale the whole time it is paused. Calling it
+    fresh by definition is a false READY — the failure this gate exists to
+    prevent.
+    """
     if isinstance(latest, Exception):
         return Dependency(ref.name, ref.kind, False,
                           detail=f"history unreadable ({failure_category(latest)})")
