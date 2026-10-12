@@ -14,7 +14,7 @@ from .walker import walk
 
 
 def collect_history(view: str, ws: Workspace, config: Config,
-            today: date | None = None
+                    today: date | None = None
             ) -> tuple[Recommendation, list[TableHistory], list[Skipped]]:
     """Walk, read, and roll up. Shared by analyze() and advise()."""
     today = today or datetime.now(config.tz).date()

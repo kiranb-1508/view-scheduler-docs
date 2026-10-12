@@ -63,7 +63,9 @@ def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
     return ",".join(WEEKDAYS[d] for d in seen)
 
 
-def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[DependencyRow]:
+def dependency_rows(histories: Sequence[TableHistory],
+                    span: Sequence[date]) -> list[DependencyRow]:
+    """One report row per upstream table: its pattern, its usual, its worst."""
     rows: list[DependencyRow] = []
     for history in histories:
         days = sorted(history.finish_times)

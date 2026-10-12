@@ -223,7 +223,7 @@ def can_refresh(
 
 
 def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
-             window: int) -> Dependency:
+                 window: int) -> Dependency:
     """Turn one dependency's newest qualifying write into a fresh/stale verdict.
 
     A streaming table goes through the same check as a managed table. A
@@ -245,6 +245,7 @@ def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
 
 
 def _dep_line(dep: Dependency, zone: ZoneInfo) -> str:
+    """One dependency line: mark, name, type, age, and any reason."""
     if dep.ok and dep.last_refresh is None:
         return f"note   {dep.name}  ({dep.kind})  {dep.detail}"
     mark = "fresh" if dep.ok else "stale"

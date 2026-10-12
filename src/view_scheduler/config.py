@@ -8,6 +8,11 @@ from zoneinfo import ZoneInfo
 
 @dataclass(frozen=True)
 class Config:
+    """The four settings. Nothing else is tunable without a decision.
+
+    days_history, buffer_min, and timezone drive the advisor. fresh_hours
+    drives the gate only. Ask before adding a fifth field.
+    """
 
     days_history: int = 30
     buffer_min: int = 15

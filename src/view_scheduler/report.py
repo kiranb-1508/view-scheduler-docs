@@ -37,6 +37,10 @@ def _too_early(result: Recommendation) -> int:
 
 def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
            timezone: str) -> str:
+    """The advice report: the two times, the evidence, and the warnings.
+
+    Plain words only. A reader must know what to do after one read.
+    """
     lines: list[str] = []
     deps = len(result.rows)
     lines.append(f"VIEW   {view}")
@@ -105,6 +109,11 @@ def all_clear_series(result: Recommendation) -> list[str]:
 
 
 def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
+    """Every reason to distrust the two times, one line each.
+
+    A warning never changes a number. It tells the reader what the number
+    cannot say.
+    """
     out: list[str] = []
 
     for row in sorted(result.rows, key=lambda r: r.name):

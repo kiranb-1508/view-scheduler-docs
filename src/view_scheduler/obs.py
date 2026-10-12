@@ -12,6 +12,7 @@ logger = logging.getLogger("view_scheduler")
 
 
 def setup(level: int = logging.INFO) -> None:
+    """Send one JSON line per external call to stderr. Safe to call twice."""
     if logger.handlers:
         return
     handler = logging.StreamHandler()

@@ -139,7 +139,7 @@ def _from_epoch(value):
 
 
 def read_delta_history(ws: "Workspace", table: str, *,
-                 with_metrics: bool = True) -> list:
+                       with_metrics: bool = True) -> list:
     """Every commit for a physical Delta table, newest first.
 
     `with_metrics=False` drops the wide operationMetrics column. The gate only

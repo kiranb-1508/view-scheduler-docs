@@ -122,7 +122,8 @@ def advise(
 
 
 def _to_advice(view: str, result: Recommendation, skipped: list[Skipped],
-           config: Config) -> Advice:
+               config: Config) -> Advice:
+    """Turn the recommendation into the Advice object the caller returns."""
     rows = tuple(
         DependencyRun(
             name=row.name,
