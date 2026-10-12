@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 from .client import Workspace, failure_category, read_latest_commit, workspace_from_env
 from .config import DEFAULT, Config
-from .walker import walk_refs
+from .walker import walk
 
 
 @dataclass(frozen=True)
@@ -202,13 +202,13 @@ def can_refresh(
 
     results: list[ViewResult] = []
     for view in names:
-        refs, blockers, notes = walk_refs(view, fetch_meta)
+        found = walk(view, fetch_meta)
         deps = [_measure(ref, latest_write(ref.name), cutoff, moment, window)
-                for ref in refs]
+                for ref in found.tables]
         deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
-                 for item in blockers]
+                 for item in found.blockers]
         deps += [Dependency(item.name, "FUNCTION", True, detail=item.reason)
-                 for item in notes]
+                 for item in found.notes]
         results.append(ViewResult(view, all(dep.ok for dep in deps), tuple(deps)))
 
     outcome = GateResult(
