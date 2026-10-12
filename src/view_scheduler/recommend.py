@@ -63,7 +63,7 @@ def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
     return ",".join(WEEKDAYS[d] for d in seen)
 
 
-def build_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[DependencyRow]:
+def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date]) -> list[DependencyRow]:
     rows: list[DependencyRow] = []
     for history in histories:
         days = sorted(history.finish_times)
@@ -145,7 +145,7 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
         common &= set(history.finish_times)
 
     span = observed_span(histories)
-    rows = build_rows(histories, span)
+    rows = dependency_rows(histories, span)
 
     if not common:
         return Recommendation(None, None, 0, len(span), rows, {})
@@ -155,16 +155,16 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     }
     # Sort by clock time, not datetime — latest time of day, not most recent date.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
-    safe, safe_next = _plus(ordered[-1], buffer_min)
+    safe, safe_next = _add_buffer(ordered[-1], buffer_min)
     if len(ordered) >= 2:
-        earlier, earlier_next = _plus(ordered[-2], buffer_min)
+        earlier, earlier_next = _add_buffer(ordered[-2], buffer_min)
     else:
         earlier, earlier_next = safe, safe_next
     return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
                           safe_next, earlier_next)
 
 
-def _plus(moment: datetime, minutes: int) -> tuple[time, bool]:
+def _add_buffer(moment: datetime, minutes: int) -> tuple[time, bool]:
     """Add the buffer, reporting whether it crossed midnight.
 
     The caller needs the rollover: a 23:50 all-clear plus a 15-minute buffer is

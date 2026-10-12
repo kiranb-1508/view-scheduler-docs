@@ -22,7 +22,7 @@ from .client import Workspace, workspace_from_env
 from .config import DEFAULT, Config
 from .models import Skipped
 from .recommend import Recommendation
-from .run import collect
+from .run import collect_history
 
 
 @dataclass(frozen=True)
@@ -113,15 +113,15 @@ def advise(
     workspace = ws or workspace_from_env()
     moment = today or datetime.now(settings.tz).date()
 
-    result, _, skipped = collect(view, workspace, settings, moment)
-    advice = _build(view, result, skipped, settings)
+    result, _, skipped = collect_history(view, workspace, settings, moment)
+    advice = _to_advice(view, result, skipped, settings)
 
     if not quiet:
         print(advice)
     return advice
 
 
-def _build(view: str, result: Recommendation, skipped: list[Skipped],
+def _to_advice(view: str, result: Recommendation, skipped: list[Skipped],
            config: Config) -> Advice:
     rows = tuple(
         DependencyRun(

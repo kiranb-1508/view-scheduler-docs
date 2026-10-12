@@ -1,6 +1,6 @@
 """The read-only I/O layer, exercised offline through a fake Workspace.
 
-read_history and read_mv_refreshes were only ever reached against a live
+read_delta_history and read_mv_refreshes were only ever reached against a live
 warehouse; the materialized-view fallback in particular had no test at any
 level, despite being the trickiest path (DESCRIBE HISTORY is rejected on an MV,
 so refresh times come from the pipeline event log instead).
@@ -12,18 +12,18 @@ import pytest
 
 from conftest import FakeWorkspace
 from view_scheduler.client import (
-    failure_category, parse_json_field, read_history, read_mv_refreshes,
+    failure_category, parse_json_field, read_delta_history, read_mv_refreshes,
 )
 from tests import fixtures as f
 
 UTC = timezone.utc
 
 
-# --- read_history ------------------------------------------------------------
+# --- read_delta_history ------------------------------------------------------------
 
-def test_read_history_parses_the_raw_sql_api_shape():
+def test_read_delta_history_parses_the_raw_sql_api_shape():
     ws = FakeWorkspace(history={"c.s.t": f.OPERATION_ZOO})
-    commits = read_history(ws, "c.s.t")
+    commits = read_delta_history(ws, "c.s.t")
     assert len(commits) == len(f.OPERATION_ZOO)
     # operationParameters/operationMetrics arrive as JSON strings and must be
     # parsed back to maps (or None when absent).

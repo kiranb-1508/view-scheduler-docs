@@ -138,7 +138,7 @@ def _from_epoch(value):
     return datetime.fromtimestamp(int(value), tz=timezone.utc)
 
 
-def read_history(ws: "Workspace", table: str, *,
+def read_delta_history(ws: "Workspace", table: str, *,
                  with_metrics: bool = True) -> list:
     """Every commit for a physical Delta table, newest first.
 
@@ -195,7 +195,7 @@ def read_commits(ws: "Workspace", table: str, *,
     rejects it, so fall back to the pipeline event log.
     """
     try:
-        return read_history(ws, table, with_metrics=with_metrics)
+        return read_delta_history(ws, table, with_metrics=with_metrics)
     except Exception as exc:
         if "expect_table_not_view" in str(exc).lower():
             with obs.call("mv.event_log", table):

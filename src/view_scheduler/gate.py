@@ -203,7 +203,7 @@ def can_refresh(
     results: list[ViewResult] = []
     for view in names:
         found = walk(view, fetch_meta)
-        deps = [_measure(ref, latest_write(ref.name), cutoff, moment, window)
+        deps = [_verdict_for(ref, latest_write(ref.name), cutoff, moment, window)
                 for ref in found.tables]
         deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
                  for item in found.blockers]
@@ -222,7 +222,7 @@ def can_refresh(
     return outcome
 
 
-def _measure(ref, latest, cutoff: datetime, moment: datetime,
+def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
              window: int) -> Dependency:
     """Turn one dependency's newest qualifying write into a fresh/stale verdict.
 

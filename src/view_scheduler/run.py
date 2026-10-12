@@ -13,7 +13,7 @@ from .report import render
 from .walker import walk
 
 
-def collect(view: str, ws: Workspace, config: Config,
+def collect_history(view: str, ws: Workspace, config: Config,
             today: date | None = None
             ) -> tuple[Recommendation, list[TableHistory], list[Skipped]]:
     """Walk, read, and roll up. Shared by analyze() and advise()."""
@@ -42,7 +42,7 @@ def analyze(view: str, ws: Workspace, config: Config,
 
     Prefer `advise()` unless you need the raw pieces.
     """
-    result, histories, skipped = collect(view, ws, config, today)
+    result, histories, skipped = collect_history(view, ws, config, today)
     return render(view, result, skipped, config.timezone), histories, skipped
 
 
