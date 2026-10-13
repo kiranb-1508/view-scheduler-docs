@@ -112,7 +112,11 @@ class Workspace:
         """
         if self.spark is not None:
             with obs.call("spark.sql", target):
-                return [dict(row.asDict()) for row in self.spark.sql(statement)]
+                # collect(), never iteration: pyspark 4 yields Column objects
+                # when a DataFrame is iterated, and a Column's missing
+                # attribute reads as `'Column' object is not callable`.
+                rows = self.spark.sql(statement).collect()
+                return [dict(row.asDict()) for row in rows]
 
         if self.warehouse_id is None:
             raise ValueError("warehouse_id is required for SQL calls")
