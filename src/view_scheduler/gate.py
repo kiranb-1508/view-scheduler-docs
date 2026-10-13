@@ -33,7 +33,7 @@ from datetime import datetime, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .client import Workspace, failure_category, read_latest_commit, workspace_from_env
+from .client import Workspace, failure_category, read_latest_commit
 from .config import DEFAULT, Config
 from .walker import walk
 
@@ -173,7 +173,7 @@ def can_refresh(
     cutoff = moment - timedelta(hours=window)
     not_after = int(moment.timestamp())
 
-    workspace = ws or workspace_from_env()
+    workspace = ws or Workspace()
 
     # Shared across the whole call: a table two views depend on is read once,
     # and a failure is remembered rather than retried for every view.

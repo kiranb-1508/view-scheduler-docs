@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
 from . import report
-from .client import Workspace, workspace_from_env
+from .client import Workspace
 from .config import DEFAULT, Config
 from .models import Skipped
 from .recommend import Recommendation
@@ -110,7 +110,7 @@ def advise(
     the printed report; the result is returned either way.
     """
     settings = config or DEFAULT
-    workspace = ws or workspace_from_env()
+    workspace = ws or Workspace()
     moment = today or datetime.now(settings.tz).date()
 
     result, _, skipped = collect_history(view, workspace, settings, moment)

@@ -163,7 +163,10 @@ are the whole table:
 | Function dependency (a UDF) | a note, not a blocker |
 
 `Workspace(warehouse_id=...)` and `Config.fresh_hours` are optional. Without a
-`Workspace`, the gate reads `WAREHOUSE_ID` from the environment, so the
+`Workspace`, the engine is picked in order: an explicit warehouse, then
+`WAREHOUSE_ID` from the environment, then the Spark session the code already
+runs inside — so `can_refresh("c.s.view")` in a notebook or job needs no setup
+at all. On a laptop only the warehouse options exist, so
 one-liner above is enough inside a job.
 
 **Permissions.** The caller needs `SELECT` on each dependency (for

@@ -15,6 +15,20 @@ from . import obs
 from .history import qualifying
 
 
+def active_spark() -> Any | None:
+    """The live SparkSession inside this Python process, or None.
+
+    Inside a Databricks notebook or job, a session is already running, and
+    `spark.sql()` costs no warehouse. Import lazily: a laptop CLI has no
+    pyspark, and that must stay an ordinary None, not an error.
+    """
+    try:
+        from pyspark.sql import SparkSession
+    except ImportError:
+        return None
+    return SparkSession.getActiveSession()
+
+
 def quote_name(full_name: str) -> str:
     """Backtick each part of a dotted Unity Catalog name.
 
@@ -29,12 +43,50 @@ def quote_name(full_name: str) -> str:
 
 
 class Workspace:
-    """Thin wrapper over the SDK. One method per external call we make."""
+    """The one I/O seam. Read-only: metadata through the SDK, history SQL
+    through the warehouse — or through the SparkSession the code already
+    runs inside.
 
-    def __init__(self, client: WorkspaceClient | None = None,
-                 warehouse_id: str | None = None):
-        self.w = client or WorkspaceClient()
+    Resolution order for the history engine:
+
+      1. an explicit `warehouse_id`,
+      2. the $WAREHOUSE_ID environment variable,
+      3. a live SparkSession (a Databricks notebook, job, or pipeline),
+      4. an error that names every missing option.
+
+    Metadata (`get_table`) always goes through the SDK client, which on
+    Databricks compute needs no warehouse: it authenticates from the notebook
+    context. The SDK client is built lazily, on first use.
+    """
+
+    #: None means "not built yet"; `w` builds the SDK client on first use,
+    #: so a plain Workspace() with an active Spark session never touches it
+    #: until get_table needs it. Define nothing here; the property below owns it.
+
+    def __init__(self, warehouse_id: str | None = None,
+                 client: WorkspaceClient | None = None,
+                 spark: Any | None = None):
+        self._w = client
         self.warehouse_id = warehouse_id
+        self.spark = spark
+        if warehouse_id is None and spark is None:
+            warehouse_id = os.environ.get("WAREHOUSE_ID")
+        if warehouse_id is None and spark is None:
+            spark = active_spark()
+        if warehouse_id is None and spark is None:
+            raise ValueError(
+                "no engine: pass Workspace(warehouse_id='...'), "
+                "set the WAREHOUSE_ID environment variable, "
+                "or run inside Databricks, where a Spark session exists")
+        self.warehouse_id = warehouse_id
+        self.spark = spark
+
+    @property
+    def w(self) -> WorkspaceClient:
+        """The SDK client, built once, the first time it is needed."""
+        if self._w is None:
+            self._w = WorkspaceClient()
+        return self._w
 
     # --- Unity Catalog -------------------------------------------------------
 
@@ -50,9 +102,18 @@ class Workspace:
     def sql(self, statement: str, target: str) -> list[dict[str, Any]]:
         """Run a read-only statement. Return every row as a dict of strings.
 
-        Follows result chunking to the end, and refuses a truncated result, so a
-        caller never silently sees only the first page of a large result.
+        Two engines, one seam. A SparkSession runs the statement on the local
+        compute; otherwise the Statement API runs it on a warehouse. The rows
+        must be interchangeable: same columns, same order, same facts.
+
+        The statement path also follows result chunking to the end and refuses
+        a truncated result, so a caller never silently sees only the first
+        page of a large result.
         """
+        if self.spark is not None:
+            with obs.call("spark.sql", target):
+                return [dict(row.asDict()) for row in self.spark.sql(statement)]
+
         if self.warehouse_id is None:
             raise ValueError("warehouse_id is required for SQL calls")
 
@@ -87,13 +148,8 @@ class Workspace:
 
 
 def workspace_from_env() -> "Workspace":
-    """Build a Workspace from $WAREHOUSE_ID, or say exactly what is missing."""
-    warehouse = os.environ.get("WAREHOUSE_ID")
-    if not warehouse:
-        raise ValueError(
-            "no warehouse: pass Workspace(warehouse_id='...') "
-            "or set the WAREHOUSE_ID environment variable")
-    return Workspace(warehouse_id=warehouse)
+    """Retired: resolution now lives in Workspace() itself."""
+    return Workspace()
 
 
 def failure_category(exc: Exception) -> str:
