@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,12 +8,11 @@ version = "0.4.0"
 description = "Recommend when a Unity Catalog view can be materialized with every dependency already refreshed"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = "MIT"
 authors = [{ name = "Kiran B" }]
 keywords = ["databricks", "unity-catalog", "delta", "scheduling"]
 
 classifiers = [
-    "Private :: Do Not Upload",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -22,6 +21,9 @@ classifiers = [
 dependencies = [
     "databricks-sdk>=0.30",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kiranb-1508/view-scheduler-docs"
 
 [project.optional-dependencies]
 dev = [

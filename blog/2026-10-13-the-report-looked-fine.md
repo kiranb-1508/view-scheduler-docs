@@ -90,10 +90,10 @@ The safe time is the worst finish over 30 days, plus a 15-minute buffer. The ear
 
 ## Try it
 
-The library is open source: [view-scheduler on GitHub](https://github.com/kiranb-1508/view-scheduler-docs). Install it with pip, point it at a Unity Catalog view, and ask it when you should schedule.
+The library is open source and on PyPI: [view-scheduler on PyPI](https://pypi.org/project/view-scheduler/) ([source on GitHub](https://github.com/kiranb-1508/view-scheduler-docs)). Install it, point it at a Unity Catalog view, and ask it when you should schedule.
 
 ```
-pip install git+https://github.com/kiranb-1508/view-scheduler-docs.git
+pip install view-scheduler
 ```
 
 
