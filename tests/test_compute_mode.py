@@ -31,6 +31,35 @@ class FakeRow:
         return dict(self._mapping)
 
 
+class ColumnLike:
+    """A pyspark Column mimic.
+
+    Real Column objects do not raise AttributeError for a missing attribute;
+    they return a callable that fails when called — which is why a transport
+    bug reads as `'Column' object is not callable` rather than 'no attribute'.
+    """
+
+    def __getattr__(self, name):
+        def not_a_row():
+            raise TypeError("'Column' object is not callable")
+        return not_a_row
+
+
+class FakeDataFrame:
+    """Mimics a pyspark DataFrame: `collect()` yields Rows. Iterating does
+    NOT — pyspark 4 yields Columns, which is exactly the trap the transport
+    must avoid."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def collect(self):
+        return [FakeRow(r) for r in self._rows]
+
+    def __iter__(self):
+        return iter([ColumnLike() for _ in self._rows])
+
+
 class FakeSpark:
     """The SparkSession surface the Spark mode touches: `sql()` only."""
 
@@ -42,7 +71,7 @@ class FakeSpark:
         self.statements.append(statement)
         for key, rows in self.answers.items():
             if key in statement:
-                return [FakeRow(r) for r in rows]
+                return FakeDataFrame(rows)
         raise AssertionError(f"no answer staged for: {statement[:80]}")
 
 
@@ -132,6 +161,15 @@ def test_error_names_every_missing_engine(monkeypatch):
 
 
 # --- reads through Spark -----------------------------------------------------
+
+def test_spark_rows_come_from_collect_not_from_iteration():
+    """Spark 4 trap: iterating a DataFrame yields Columns, so the only correct
+    row source is collect(). With the previous transport, every history read
+    died with 'Column' object is not callable."""
+    session = FakeSpark({"SELECT": [{"version": 1}]})
+    ws = Workspace(spark=session)
+    assert ws.sql("SELECT 1", "probe") == [{"version": 1}]
+
 
 def test_reads_history_through_spark(monkeypatch):
     """`read_latest_commit` turns an epoch int into an aware UTC datetime."""
