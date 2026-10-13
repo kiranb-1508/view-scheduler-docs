@@ -69,7 +69,7 @@ tasks:
 
 ### From source
 
-For working on the package itself. Requires access to this private repo.
+For working on the package itself:
 
 ```bash
 pip install -e ".[dev]"                                     # a checkout
@@ -180,6 +180,8 @@ it reports `history unreadable (permission)`. The call itself does not raise.
 | [docs/02-scheduler-design.html](docs/02-scheduler-design.html) | Scheduler design: architecture, code flow, four steps, worked example |
 | [docs/03-impact-design.html](docs/03-impact-design.html) | Impact analysis: given a table, what depends on it. Separate tool, separate data source |
 | [docs/04-library-flow.html](docs/04-library-flow.html) | Visual end-to-end flow: input, functions, branches, recommendation, and report |
+| [docs/05-interactive-guide.html](docs/05-interactive-guide.html) | Interactive guide: clickable flow, a gate simulator, the design decisions, and the open findings |
+| [docs/06-code-walkthrough.html](docs/06-code-walkthrough.html) | Code walkthrough: the module map, call traces, a class tour, and a searchable index of all 66 functions |
 | [rig/README.md](rig/README.md) | The 30-day fixture rig and its checkpoints |
 | [GENIE-PROMPT.md](GENIE-PROMPT.md) | Build prompt for Databricks Genie Code, phased with verification gates |
 
