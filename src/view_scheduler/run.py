@@ -13,21 +13,25 @@ from .report import render
 from .walker import walk
 
 
-def collect(view: str, ws: Workspace, config: Config,
-            today: date | None = None
+def collect_history(view: str, ws: Workspace, config: Config,
+                    today: date | None = None
             ) -> tuple[Recommendation, list[TableHistory], list[Skipped]]:
     """Walk, read, and roll up. Shared by analyze() and advise()."""
     today = today or datetime.now(config.tz).date()
-    gating, skipped = walk(view, ws.get_table)
+    found = walk(view, ws.get_table)
+    # The advisor treats a blocker the same as a note: something it must name,
+    # but cannot read. The gate keeps the two apart. See walker.py.
+    skipped = list(found.blockers) + list(found.notes)
 
     histories: list[TableHistory] = []
-    for table in gating:
+    for table in found.tables:
         try:
-            commits = read_commits(ws, table)
+            commits = read_commits(ws, table.name)
         except Exception as exc:
-            skipped.append(Skipped(table, _reason(exc)))
+            skipped.append(Skipped(table.name, _reason(exc)))
             continue
-        histories.append(summarize(table, commits, today, config.days_history, config.tz))
+        histories.append(summarize(table.name, commits, today, config.days_history,
+                                   config.tz))
 
     return recommend(histories, config.buffer_min), histories, skipped
 
@@ -38,7 +42,7 @@ def analyze(view: str, ws: Workspace, config: Config,
 
     Prefer `advise()` unless you need the raw pieces.
     """
-    result, histories, skipped = collect(view, ws, config, today)
+    result, histories, skipped = collect_history(view, ws, config, today)
     return render(view, result, skipped, config.timezone), histories, skipped
 
 

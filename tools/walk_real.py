@@ -11,11 +11,12 @@ if len(sys.argv) < 2:
 obs.setup()
 target = sys.argv[1]
 ws = Workspace()
-gating, skipped = walk(target, ws.get_table)
+found = walk(target, ws.get_table)
 print(f"\nVIEW {target}")
-print(f"  gating tables ({len(gating)}):")
-for name in gating:
-    print(f"    {name}")
+print(f"  gating tables ({len(found.tables)}):")
+for table in found.tables:
+    print(f"    {table.name}")
+skipped = list(found.blockers) + list(found.notes)
 print(f"  skipped ({len(skipped)}):")
 for item in skipped:
     print(f"    {item.name} — {item.reason}")

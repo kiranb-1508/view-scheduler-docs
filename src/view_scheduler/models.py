@@ -19,7 +19,11 @@ class Commit:
 
 @dataclass(frozen=True)
 class Skipped:
-    """A dependency that could not be resolved, and why. Never dropped silently."""
+    """A dependency we did not measure, and why. Never dropped silently.
+
+    A blocker stops the view. A note is only reported. The advisor keeps both
+    in one list and calls it `unreadable`.
+    """
 
     name: str
     reason: str

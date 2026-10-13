@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
 from . import report
-from .client import Workspace, workspace_from_env
+from .client import Workspace
 from .config import DEFAULT, Config
 from .models import Skipped
 from .recommend import Recommendation
-from .run import collect
+from .run import collect_history
 
 
 @dataclass(frozen=True)
@@ -110,19 +110,20 @@ def advise(
     the printed report; the result is returned either way.
     """
     settings = config or DEFAULT
-    workspace = ws or workspace_from_env()
+    workspace = ws or Workspace()
     moment = today or datetime.now(settings.tz).date()
 
-    result, _, skipped = collect(view, workspace, settings, moment)
-    advice = _build(view, result, skipped, settings)
+    result, _, skipped = collect_history(view, workspace, settings, moment)
+    advice = _to_advice(view, result, skipped, settings)
 
     if not quiet:
         print(advice)
     return advice
 
 
-def _build(view: str, result: Recommendation, skipped: list[Skipped],
-           config: Config) -> Advice:
+def _to_advice(view: str, result: Recommendation, skipped: list[Skipped],
+               config: Config) -> Advice:
+    """Turn the recommendation into the Advice object the caller returns."""
     rows = tuple(
         DependencyRun(
             name=row.name,

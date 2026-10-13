@@ -33,9 +33,9 @@ from datetime import datetime, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .client import Workspace, failure_category, read_latest_commit, workspace_from_env
+from .client import Workspace, failure_category, read_latest_commit
 from .config import DEFAULT, Config
-from .walker import walk_refs
+from .walker import walk
 
 
 @dataclass(frozen=True)
@@ -173,7 +173,7 @@ def can_refresh(
     cutoff = moment - timedelta(hours=window)
     not_after = int(moment.timestamp())
 
-    workspace = ws or workspace_from_env()
+    workspace = ws or Workspace()
 
     # Shared across the whole call: a table two views depend on is read once,
     # and a failure is remembered rather than retried for every view.
@@ -202,13 +202,13 @@ def can_refresh(
 
     results: list[ViewResult] = []
     for view in names:
-        refs, blockers, notes = walk_refs(view, fetch_meta)
-        deps = [_measure(ref, latest_write(ref.name), cutoff, moment, window)
-                for ref in refs]
+        found = walk(view, fetch_meta)
+        deps = [_verdict_for(ref, latest_write(ref.name), cutoff, moment, window)
+                for ref in found.tables]
         deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
-                 for item in blockers]
+                 for item in found.blockers]
         deps += [Dependency(item.name, "FUNCTION", True, detail=item.reason)
-                 for item in notes]
+                 for item in found.notes]
         results.append(ViewResult(view, all(dep.ok for dep in deps), tuple(deps)))
 
     outcome = GateResult(
@@ -222,8 +222,8 @@ def can_refresh(
     return outcome
 
 
-def _measure(ref, latest, cutoff: datetime, moment: datetime,
-             window: int) -> Dependency:
+def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
+                 window: int) -> Dependency:
     """Turn one dependency's newest qualifying write into a fresh/stale verdict.
 
     A streaming table goes through the same check as a managed table. A
@@ -245,6 +245,7 @@ def _measure(ref, latest, cutoff: datetime, moment: datetime,
 
 
 def _dep_line(dep: Dependency, zone: ZoneInfo) -> str:
+    """One dependency line: mark, name, type, age, and any reason."""
     if dep.ok and dep.last_refresh is None:
         return f"note   {dep.name}  ({dep.kind})  {dep.detail}"
     mark = "fresh" if dep.ok else "stale"

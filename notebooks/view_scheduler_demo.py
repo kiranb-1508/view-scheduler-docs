@@ -237,10 +237,11 @@ print(render("gold.after_midnight", result, [], "UTC"))
 
 from view_scheduler.walker import walk
 
-gating, walk_skipped = walk(f"{SCHEMA}.v_deep", ws.get_table)
-print(f"v_deep gates on {len(gating)} physical tables:")
-for name in gating:
-    print("   ", name)
+found = walk(f"{SCHEMA}.v_deep", ws.get_table)
+print(f"v_deep gates on {len(found.tables)} physical tables:")
+for table in found.tables:
+    print("   ", table.name)
+walk_skipped = list(found.blockers) + list(found.notes)
 if walk_skipped:
     print("\nskipped:")
     for item in walk_skipped:

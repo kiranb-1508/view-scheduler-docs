@@ -136,6 +136,12 @@ def looks_continuous(commits: Iterable[Commit], today: date, days: int,
 
 def summarize(name: str, commits: list[Commit], today: date, days: int,
               tz) -> TableHistory:
+    """Roll one table's commits into the shape the advisor needs.
+
+    Keeps the first qualifying finish of each local day, and flags the two
+    facts that weaken a number: writes with no metrics, and a table that runs
+    so often that its "finish" is only a floor.
+    """
     return TableHistory(
         name=name,
         finish_times=finish_times(commits, today, days, tz),
