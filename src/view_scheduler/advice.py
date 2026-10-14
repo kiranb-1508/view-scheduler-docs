@@ -36,6 +36,9 @@ class DependencyRun:
     days: int                 # days it ran in the period
     missed: int               # days it did not run
     note: str = ""
+    multi_daily: bool = False
+    daily_slots: tuple[time, ...] = ()
+    safe_slots: tuple[time, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,9 @@ class Advice:
     finished_by_day: tuple[tuple[date, time], ...] = ()
     warnings: tuple[str, ...] = ()
     text: str = field(default="")
+    safe_without_outliers: time | None = None
+    usual_time: time | None = None
+    outlier_days: tuple[date, ...] = ()
 
     def render(self) -> str:
         return self.text
@@ -66,6 +72,9 @@ class Advice:
             "safe_time": _clock(self.safe_time),
             "earlier_time": _clock(self.earlier_time),
             "next_day": self.next_day,
+            "safe_without_outliers": _clock(self.safe_without_outliers),
+            "usual_time": _clock(self.usual_time),
+            "outlier_days": [day.isoformat() for day in self.outlier_days],
             "days_used": self.days_used,
             "period_days": self.period_days,
             "timezone": self.timezone,
@@ -77,6 +86,9 @@ class Advice:
                     "latest": _clock(row.latest),
                     "days": row.days,
                     "missed": row.missed,
+                    "multi_daily": row.multi_daily,
+                    "daily_slots": [_clock(t) for t in row.daily_slots],
+                    "safe_slots": [_clock(t) for t in row.safe_slots],
                 }
                 for row in self.dependencies
             ],
@@ -132,6 +144,9 @@ def _to_advice(view: str, result: Recommendation, skipped: list[Skipped],
             latest=row.worst,
             days=row.observed_days,
             missed=row.missed,
+            multi_daily=row.multi_daily,
+            daily_slots=row.daily_slots,
+            safe_slots=row.safe_slots,
         )
         for row in sorted(result.rows, key=lambda r: r.name)
     )
@@ -156,6 +171,9 @@ def _to_advice(view: str, result: Recommendation, skipped: list[Skipped],
         finished_by_day=finished,
         warnings=tuple(report.warnings(result, skipped)),
         text=report.render(view, result, skipped, config.timezone),
+        safe_without_outliers=result.safe_without_outliers,
+        usual_time=result.usual,
+        outlier_days=result.outlier_days,
     )
 
 

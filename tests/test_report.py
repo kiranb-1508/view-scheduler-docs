@@ -1,6 +1,6 @@
 """Phase 4 gate: warnings appear only when they apply. Plain words only."""
 
-from datetime import date
+from datetime import date, time
 
 from view_scheduler.models import Skipped, TableHistory
 from view_scheduler.recommend import recommend
@@ -185,3 +185,41 @@ def test_no_series_when_there_is_no_overlapping_day():
     b = TableHistory("c.s.b", {DAYS[1]: f.at(DAYS[1].isoformat(), "04:00")})
     text = render("c.s.v", recommend([a, b], 15), [], "Asia/Kolkata")
     assert "WHEN THE LAST JOB FINISHED" not in text
+
+
+# --- outliers ----------------------------------------------------------------
+
+def _outlier_table(name="c.s.x"):
+    days = [date(2026, 8, d) for d in range(1, 13)]
+    return TableHistory(name, {
+        d: f.at(d.isoformat(), "06:10" if d.day in (5, 9) else "04:00")
+        for d in days
+    })
+
+
+def test_outliers_get_a_without_outliers_line():
+    text = render("c.s.v", recommend([_outlier_table()], 15), [], "Asia/Kolkata")
+    assert "WITHOUT OUTLIERS  04:15" in text
+    assert "excludes 2 outlier days" in text
+
+
+def test_a_clean_table_gets_no_without_outliers_line():
+    result = recommend([history("c.s.a")], 15)
+    assert "WITHOUT OUTLIERS" not in render("c.s.v", result, [], "Asia/Kolkata")
+
+
+# --- multi-daily tables ------------------------------------------------------
+
+def test_multi_daily_table_gets_a_slot_warning():
+    md = TableHistory("c.s.md", {d: f.at(d.isoformat(), "02:00") for d in DAYS},
+                      multi_daily=True,
+                      daily_slots=(time(2, 0), time(9, 0), time(17, 0)))
+    text = render("c.s.v", recommend([md], 15), [], "Asia/Kolkata")
+    assert "refreshes 3 times a day" in text
+    assert "usually 02:00, 09:00, 17:00" in text
+    assert "safe at 02:15, 09:15, 17:15" in text
+
+
+def test_a_once_a_day_table_gets_no_slot_warning():
+    result = recommend([history("c.s.a")], 15)
+    assert "times a day" not in render("c.s.v", result, [], "Asia/Kolkata")

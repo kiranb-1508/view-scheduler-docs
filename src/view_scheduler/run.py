@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 from .client import Workspace, failure_category, read_commits
 from .config import Config
@@ -15,7 +15,7 @@ from .walker import walk
 
 def collect_history(view: str, ws: Workspace, config: Config,
                     today: date | None = None
-            ) -> tuple[Recommendation, list[TableHistory], list[Skipped]]:
+                    ) -> tuple[Recommendation, list[TableHistory], list[Skipped]]:
     """Walk, read, and roll up. Shared by analyze() and advise()."""
     today = today or datetime.now(config.tz).date()
     found = walk(view, ws.get_table)
@@ -23,10 +23,14 @@ def collect_history(view: str, ws: Workspace, config: Config,
     # but cannot read. The gate keeps the two apart. See walker.py.
     skipped = list(found.blockers) + list(found.notes)
 
+    cutoff_day = today - timedelta(days=config.days_history)
+    since_epoch = int(datetime.combine(cutoff_day, time.min,
+                                       tzinfo=config.tz).timestamp())
+
     histories: list[TableHistory] = []
     for table in found.tables:
         try:
-            commits = read_commits(ws, table.name)
+            commits = read_commits(ws, table.name, since_epoch=since_epoch)
         except Exception as exc:
             skipped.append(Skipped(table.name, _reason(exc)))
             continue
@@ -34,6 +38,9 @@ def collect_history(view: str, ws: Workspace, config: Config,
                                    config.tz))
 
     return recommend(histories, config.buffer_min), histories, skipped
+
+
+collect = collect_history
 
 
 def analyze(view: str, ws: Workspace, config: Config,

@@ -199,18 +199,24 @@ def _from_epoch(value):
 
 
 def read_delta_history(ws: "Workspace", table: str, *,
-                       with_metrics: bool = True) -> list:
+                       with_metrics: bool = True,
+                       since_epoch: int | None = None) -> list:
     """Every commit for a physical Delta table, newest first.
 
     `with_metrics=False` drops the wide operationMetrics column. The gate only
-    classifies commits, so it never needs it; analyze() does.
+    classifies commits, so it never needs it; analyze() does. A `since_epoch`
+    keeps only commits at or after that epoch second, so SQL returns a small
+    window instead of the whole history.
     """
     from .models import Commit
     metrics = ", operationMetrics" if with_metrics else ""
+    where = (f"WHERE unix_timestamp(timestamp) >= {int(since_epoch)} "
+             if since_epoch is not None else "")
     rows = ws.sql(
         "SELECT version, unix_timestamp(timestamp) AS ts_epoch, operation, "
         f"operationParameters{metrics} "
         f"FROM (DESCRIBE HISTORY {quote_name(table)}) "
+        f"{where}"
         "ORDER BY version DESC",
         target=table)
     return [
@@ -226,11 +232,16 @@ def read_delta_history(ws: "Workspace", table: str, *,
     ]
 
 
-def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
+read_history = read_delta_history
+
+
+def read_mv_refreshes(ws: "Workspace", mv: str, *,
+                      since_epoch: int | None = None) -> list:
     """Completed MV refreshes from the pipeline event log.
 
     DESCRIBE HISTORY is rejected on a materialized view, so this is the only
-    way to see when it last refreshed.
+    way to see when it last refreshed. A `since_epoch` keeps only refreshes at
+    or after that epoch second.
     """
     from .models import Commit
     statement = (
@@ -239,6 +250,8 @@ def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
         "WHERE event_type = 'update_progress' "
         "AND get_json_object(details, '$.update_progress.state') = 'COMPLETED'"
     )
+    if since_epoch is not None:
+        statement += f" AND unix_timestamp(timestamp) >= {int(since_epoch)}"
     rows = ws.sql(statement, target=mv)
     return [
         Commit(version=i, timestamp=_from_epoch(r["ts_epoch"]),
@@ -248,31 +261,36 @@ def read_mv_refreshes(ws: "Workspace", mv: str) -> list:
 
 
 def read_commits(ws: "Workspace", table: str, *,
-                 with_metrics: bool = True) -> list:
+                 with_metrics: bool = True,
+                 since_epoch: int | None = None) -> list:
     """History for any physical object: a table, streaming table, or MV.
 
     DESCRIBE HISTORY covers tables and streaming tables. A materialized view
-    rejects it, so fall back to the pipeline event log.
+    rejects it, so fall back to the pipeline event log. A `since_epoch` is
+    forwarded to both readers.
     """
     try:
-        return read_delta_history(ws, table, with_metrics=with_metrics)
+        return read_delta_history(ws, table, with_metrics=with_metrics,
+                                  since_epoch=since_epoch)
     except Exception as exc:
         if "expect_table_not_view" in str(exc).lower():
             with obs.call("mv.event_log", table):
-                return read_mv_refreshes(ws, table)
+                return read_mv_refreshes(ws, table, since_epoch=since_epoch)
         raise
 
 
 def read_latest_commit(ws: "Workspace", table: str, *,
-                       not_after: int | None = None) -> datetime | None:
+                       not_after: int | None = None,
+                       since_epoch: int | None = None) -> datetime | None:
     """The newest qualifying write for a table or an MV, or None.
 
     This is the gate's one question. A write dated after `not_after` (epoch
     seconds) is ignored, so a clock-skewed future commit cannot make a stale
-    table look fresh.
+    table look fresh. A `since_epoch` keeps the read small.
     """
     newest: datetime | None = None
-    for commit in read_commits(ws, table, with_metrics=False):
+    for commit in read_commits(ws, table, with_metrics=False,
+                               since_epoch=since_epoch):
         if not qualifying(commit):
             continue
         if not_after is not None and commit.timestamp.timestamp() > not_after:

@@ -1,6 +1,6 @@
 """The read-only I/O layer, exercised offline through a fake Workspace.
 
-read_delta_history and read_mv_refreshes were only ever reached against a live
+read_history and read_mv_refreshes were only ever reached against a live
 warehouse; the materialized-view fallback in particular had no test at any
 level, despite being the trickiest path (DESCRIBE HISTORY is rejected on an MV,
 so refresh times come from the pipeline event log instead).
@@ -12,18 +12,84 @@ import pytest
 
 from conftest import FakeWorkspace
 from view_scheduler.client import (
-    failure_category, parse_json_field, read_delta_history, read_mv_refreshes,
+    failure_category, parse_json_field, read_commits, read_delta_history,
+    read_history, read_mv_refreshes,
 )
 from tests import fixtures as f
 
 UTC = timezone.utc
 
 
-# --- read_delta_history ------------------------------------------------------------
+class RecordingWorkspace(FakeWorkspace):
+    """A FakeWorkspace that also keeps every SQL statement it was given.
 
-def test_read_delta_history_parses_the_raw_sql_api_shape():
+    `FakeWorkspace.sql_calls` stores only the target, so it cannot show the
+    text. This subclass records the statement too, which the SQL-filter tests
+    need.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.statements: list[str] = []
+
+    def sql(self, statement, target):
+        self.statements.append(statement)
+        return super().sql(statement, target)
+
+
+# --- history window filters --------------------------------------------------
+
+def test_read_history_without_since_epoch_has_no_time_filter():
+    ws = RecordingWorkspace()
+    read_history(ws, "c.s.t")
+    assert "WHERE unix_timestamp(timestamp) >=" not in ws.statements[-1]
+
+
+def test_read_history_with_since_epoch_adds_the_time_filter():
+    ws = RecordingWorkspace()
+    read_history(ws, "c.s.t", since_epoch=1700000000)
+    assert "WHERE unix_timestamp(timestamp) >= 1700000000" in ws.statements[-1]
+
+
+def test_read_mv_refreshes_with_since_epoch_adds_the_time_filter():
+    ws = RecordingWorkspace()
+    read_mv_refreshes(ws, "c.s.mv", since_epoch=1700000000)
+    assert "AND unix_timestamp(timestamp) >= 1700000000" in ws.statements[-1]
+
+
+def test_read_commits_forwards_since_epoch_to_both_readers(monkeypatch):
+    import view_scheduler.client as client
+    ws = RecordingWorkspace()
+    seen: list[tuple[str, int | None]] = []
+
+    def fake_history(ws_, table, *, with_metrics=True, since_epoch=None):
+        seen.append(("history", since_epoch))
+        return []
+
+    def fake_mv(ws_, mv, *, since_epoch=None):
+        seen.append(("mv", since_epoch))
+        return []
+
+    monkeypatch.setattr(client, "read_delta_history", fake_history)
+    monkeypatch.setattr(client, "read_mv_refreshes", fake_mv)
+
+    read_commits(ws, "c.s.t", since_epoch=1700000000)
+    assert seen == [("history", 1700000000)]
+
+    # The MV fallback must forward the same window.
+    def rejecting_history(ws_, table, *, with_metrics=True, since_epoch=None):
+        raise RuntimeError("EXPECT_TABLE_NOT_VIEW")
+
+    monkeypatch.setattr(client, "read_delta_history", rejecting_history)
+    read_commits(ws, "c.s.mv", since_epoch=1700000000)
+    assert seen[-1] == ("mv", 1700000000)
+
+
+# --- read_history ------------------------------------------------------------
+
+def test_read_history_parses_the_raw_sql_api_shape():
     ws = FakeWorkspace(history={"c.s.t": f.OPERATION_ZOO})
-    commits = read_delta_history(ws, "c.s.t")
+    commits = read_history(ws, "c.s.t")
     assert len(commits) == len(f.OPERATION_ZOO)
     # operationParameters/operationMetrics arrive as JSON strings and must be
     # parsed back to maps (or None when absent).

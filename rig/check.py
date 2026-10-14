@@ -21,10 +21,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 import oracle  # noqa: E402
 import plan  # noqa: E402
 from view_scheduler import obs  # noqa: E402
-from view_scheduler.client import Workspace  # noqa: E402
+from view_scheduler.client import Workspace, read_commits  # noqa: E402
 from view_scheduler.config import Config  # noqa: E402
 from view_scheduler.recommend import recommend  # noqa: E402
-from view_scheduler.run import _read, analyze  # noqa: E402
+from view_scheduler.run import analyze  # noqa: E402
 
 CONFIG = Config()
 
@@ -65,7 +65,7 @@ def check_schedule_driven(ws: Workspace, today) -> list[str]:
     problems: list[str] = []
     for name, what in SCHEDULE_DRIVEN.items():
         try:
-            commits = _read(ws, qualified(name))
+            commits = read_commits(ws, qualified(name))
         except Exception as exc:
             problems.append(f"{name} ({what}): history unreadable — {exc}")
             continue

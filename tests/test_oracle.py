@@ -23,7 +23,7 @@ from view_scheduler.models import TableHistory
 from view_scheduler.recommend import recommend
 from view_scheduler.report import render
 
-TODAY = plan.RIG_END
+TODAY = plan.RIG_START + timedelta(days=29)
 BUFFER = 15
 
 
@@ -55,7 +55,9 @@ def test_late_tail_pushes_safe_out_and_leaves_earlier_behind():
     every day finishes at 04:00 and the two numbers collapse together."""
     result = recommend([history_from_plan("t_daily_late_tail")], BUFFER)
     assert result.safe == time(6, 25)
-    assert result.earlier == time(6, 25), "two late days, so second-worst is also late"
+    assert result.safe_without_outliers == time(4, 15)
+    assert result.earlier == time(4, 15), \
+        "both late days are outliers, so earlier falls back to the normal tail"
 
     tight = recommend([history_from_plan("t_daily_tight")], BUFFER)
     assert tight.safe == tight.earlier == time(4, 15)
@@ -72,7 +74,7 @@ def test_a_weekly_dependency_hides_the_other_tables_bad_days():
     """
     tables = plan.VIEWS["v_realistic"]
     result = recommend([history_from_plan(t) for t in tables], BUFFER)
-    mondays = len([d for d in plan.days() if d.weekday() == 0])
+    mondays = len(oracle.finishes_upto("t_weekly_mon", TODAY, 30))
     assert result.safe == time(4, 15)
     assert result.n_days == mondays
 

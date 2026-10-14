@@ -396,3 +396,110 @@ def test_golden_report():
         "  c.s.t_old   (needed by c.s.v)",
     ])
     assert run("c.s.v", ws).render() == expected
+
+
+# --- non-daily, ignored, and multi-daily tables ------------------------------
+
+def test_ignore_non_daily_passes_a_weekly_table_and_still_blocks_a_daily_one():
+    """A Monday table 3 days old is fresh for its own schedule.
+
+    The daily table wrote 40 hours ago, which is stale for a 24-hour window, so
+    it still blocks. The gate does not widen the window for every table.
+    """
+    ws = FakeWorkspace(
+        tables=view_of(["c.s.weekly", "c.s.daily"]),
+        history={"c.s.weekly": [write(72)],
+                 "c.s.daily": [write(40 + 24 * i) for i in range(30)]})
+    result = run("c.s.v", ws, ignore_non_daily=True)
+    weekly = dep(result, name="weekly")
+    assert weekly.ok is True
+    # `_weekday_label` names one weekday with an "s" ("Mons", "Thus").
+    assert weekly.cadence == "Mons"
+    assert weekly.detail == "schedule: Mons"
+    assert "schedule: Mons" in str(result)
+    daily = dep(result, name="daily")
+    assert daily.ok is False
+    assert "older than the 24h window" in daily.detail
+    assert result.ready is False
+
+
+def test_ignore_non_daily_blocks_a_weekly_table_older_than_168h():
+    ws = FakeWorkspace(tables=view_of(["c.s.weekly"]),
+                       history={"c.s.weekly": [write(240)]})   # last Monday
+    result = run("c.s.v", ws, ignore_non_daily=True)
+    assert result.ready is False
+    entry = dep(result)
+    assert entry.cadence == "Mons"
+    assert entry.detail == "schedule: Mons — older than the 168h window"
+
+
+def test_ignore_non_daily_passes_a_static_table_as_a_note():
+    ws = FakeWorkspace(tables=view_of(["c.s.static"]), history={})
+    result = run("c.s.v", ws, ignore_non_daily=True)
+    assert result.ready is True
+    entry = dep(result)
+    assert entry.ok is True
+    assert entry.last_refresh is None
+    assert "static table" in entry.detail
+    assert entry.cadence == "never"
+    assert "note" in str(result)
+
+
+def test_ignore_tables_passes_a_stale_or_empty_table():
+    empty = FakeWorkspace(tables=view_of(["c.s.event_tbl"]), history={})
+    result = run("c.s.v", empty, ignore_tables=["c.s.event_tbl"])
+    assert result.ready is True
+    assert dep(result).detail == "ignored by caller"
+
+    stale = FakeWorkspace(
+        tables=view_of(["c.s.event_tbl"]),
+        history={"c.s.event_tbl": [write(100, mode="Append")]})
+    result = run("c.s.v", stale, ignore_tables=["c.s.event_tbl"])
+    assert result.ready is True
+    entry = dep(result)
+    assert entry.detail == "ignored by caller"
+    assert entry.last_refresh == ago(100)
+
+
+def test_table_property_marks_a_table_as_not_gated():
+    cases = {
+        "event_driven": "event_driven table — ignored",
+        "static": "static table — ignored",
+        "weekly": "schedule:",
+    }
+    for mode, expected in cases.items():
+        table = {**f.uc_table("c.s.event_tbl"),
+                 "properties": {"view_scheduler.mode": mode}}
+        ws = FakeWorkspace(
+            tables={"c.s.v": f.uc_view("c.s.v", ["c.s.event_tbl"]),
+                    "c.s.event_tbl": table},
+            history={"c.s.event_tbl": [write(100)]})
+        result = run("c.s.v", ws)
+        assert result.ready is True, mode
+        assert expected in dep(result).detail, mode
+
+
+def test_check_multi_daily_shortens_the_window():
+    ws = FakeWorkspace(tables=view_of(["c.s.many"]),
+                       history={"c.s.many": [write(10), write(11), write(12)]})
+    off = run("c.s.v", ws)
+    assert off.ready is True
+    assert dep(off).multi_daily is True
+
+    on = run("c.s.v", ws, check_multi_daily=True)
+    assert on.ready is False
+    entry = dep(on)
+    assert entry.multi_daily is True
+    assert entry.last_refresh == ago(10)
+    assert "multi-daily (3x/day)" in entry.detail
+    assert "8h window" in entry.detail
+
+
+def test_to_dict_reports_cadence_and_multi_daily():
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": [write(8), write(6)]})
+    payload = run("c.s.v", ws).to_dict()
+    entry = payload["views"][0]["dependencies"][0]
+    assert entry["cadence"] == "Thus"
+    assert entry["multi_daily"] is True
+    json.dumps(payload)   # must not raise

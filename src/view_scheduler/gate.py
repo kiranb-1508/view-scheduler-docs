@@ -17,6 +17,12 @@ schedule is stale between runs. A materialized view is read from its pipeline
 event log. Anything we cannot read blocks the view, because the gate fails
 closed.
 
+The call can relax the daily check. `ignore_tables` names tables to skip.
+`ignore_non_daily` checks a weekly or static table against its own schedule.
+`check_multi_daily` shortens the window for a table that runs many times a
+day. A `view_scheduler.mode` table property can mark one table as static or
+event driven.
+
     from view_scheduler import can_refresh
 
     result = can_refresh("sales.gold.customer_360")   # WAREHOUSE_ID from env
@@ -28,14 +34,23 @@ closed.
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .client import Workspace, failure_category, read_latest_commit
+from .client import Workspace, failure_category, read_commits
 from .config import DEFAULT, Config
+from .history import finish_times, qualifying, qualifying_per_day
+from .recommend import _weekday_label
 from .walker import walk
+
+#: Values of the `view_scheduler.mode` table property that mean "do not gate on
+#: this table". The gate reads the property from the Unity Catalog metadata.
+IGNORED_MODES = {
+    "event_driven", "event-driven", "on_demand", "on-demand", "static", "ignore",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +63,8 @@ class Dependency:
     last_refresh: datetime | None = None
     age_minutes: int | None = None
     detail: str = ""
+    cadence: str = ""
+    multi_daily: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +118,8 @@ class GateResult:
                                              if dep.last_refresh else None),
                             "age_minutes": dep.age_minutes,
                             "detail": dep.detail,
+                            "cadence": dep.cadence,
+                            "multi_daily": dep.multi_daily,
                         }
                         for dep in view.dependencies
                     ],
@@ -147,6 +166,9 @@ def can_refresh(
     *,
     now: datetime | None = None,
     fresh_hours: int | None = None,
+    ignore_non_daily: bool = False,
+    ignore_tables: Sequence[str] = (),
+    check_multi_daily: bool = False,
     quiet: bool = False,
 ) -> GateResult:
     """Report whether every dependency of each view wrote recently enough.
@@ -157,6 +179,19 @@ def can_refresh(
     `fresh_hours` overrides `Config.fresh_hours` for this call only. Pass `now`
     to make a test reproducible. `quiet=True` suppresses the printed report; the
     result is returned either way.
+
+    Three options relax the default daily check:
+
+    `ignore_tables` names tables the caller does not want to gate on. A table in
+    this list passes, whatever its history shows.
+
+    `ignore_non_daily` passes a table that does not refresh every day. The gate
+    checks it against its own schedule, up to a 168-hour window, and passes a
+    table with no refresh in history as a note.
+
+    `check_multi_daily` shortens the window for a table that runs many times a
+    day. The window becomes `fresh_hours // (runs per day)`, so a table with
+    three runs a day must have written within a third of the window.
     """
     names = [views] if isinstance(views, str) else [str(name) for name in views]
     if not names:
@@ -174,11 +209,12 @@ def can_refresh(
     not_after = int(moment.timestamp())
 
     workspace = ws or Workspace()
+    ignored_set = {str(name) for name in ignore_tables}
 
     # Shared across the whole call: a table two views depend on is read once,
     # and a failure is remembered rather than retried for every view.
     meta_cache: dict[str, dict | Exception] = {}
-    hist_cache: dict[str, datetime | None | Exception] = {}
+    hist_cache: dict[str, tuple[datetime | None, str, bool, int] | Exception] = {}
 
     def fetch_meta(name: str) -> dict:
         if name not in meta_cache:
@@ -191,11 +227,22 @@ def can_refresh(
             raise cached
         return cached
 
-    def latest_write(name: str):
+    def mode_of(name: str) -> str:
+        """The `view_scheduler.mode` table property, lowercased, or ''."""
+        meta = meta_cache.get(name)
+        if not isinstance(meta, dict):
+            return ""
+        props = meta.get("properties") or {}
+        if not isinstance(props, dict):
+            return ""
+        return str(props.get("view_scheduler.mode")
+                   or props.get("view_scheduler.cadence") or "").strip().lower()
+
+    def history_of(name: str):
         if name not in hist_cache:
             try:
-                hist_cache[name] = read_latest_commit(
-                    workspace, name, not_after=not_after)
+                hist_cache[name] = _history_summary(
+                    workspace, name, moment, settings, not_after)
             except Exception as exc:
                 hist_cache[name] = exc
         return hist_cache[name]
@@ -203,7 +250,10 @@ def can_refresh(
     results: list[ViewResult] = []
     for view in names:
         found = walk(view, fetch_meta)
-        deps = [_verdict_for(ref, latest_write(ref.name), cutoff, moment, window)
+        deps = [_verdict_for(ref, history_of(ref.name), cutoff, moment, window,
+                             ignored_set=ignored_set, mode=mode_of(ref.name),
+                             ignore_non_daily=ignore_non_daily,
+                             check_multi_daily=check_multi_daily)
                 for ref in found.tables]
         deps += [Dependency(item.name, "UNKNOWN", False, detail=item.reason)
                  for item in found.blockers]
@@ -222,9 +272,47 @@ def can_refresh(
     return outcome
 
 
-def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
-                 window: int) -> Dependency:
-    """Turn one dependency's newest qualifying write into a fresh/stale verdict.
+def _history_summary(workspace: Workspace, name: str, moment: datetime,
+                     settings: Config, not_after: int
+                     ) -> tuple[datetime | None, str, bool, int]:
+    """(newest qualifying write, cadence label, multi-daily, runs per day).
+
+    `latest` ignores a write dated after `not_after`, so a clock-skewed future
+    commit cannot make a stale table look fresh. The cadence label comes from
+    the weekdays the table wrote on in the window. `multi_daily` is True when
+    the median active day held two or more qualifying commits.
+    """
+    commits = read_commits(workspace, name, with_metrics=False)
+    latest: datetime | None = None
+    for commit in commits:
+        if not qualifying(commit):
+            continue
+        if commit.timestamp.timestamp() > not_after:
+            continue
+        if latest is None or commit.timestamp > latest:
+            latest = commit.timestamp
+
+    days = sorted(finish_times(commits, moment.date(),
+                               settings.days_history, settings.tz))
+    span = [moment.date() - timedelta(days=i)
+            for i in range(settings.days_history - 1, -1, -1)]
+    cadence = _weekday_label(days, span)
+    per_day = qualifying_per_day(commits, moment.date(),
+                                 settings.days_history, settings.tz)
+    median_runs = int(statistics.median(per_day.values())) if per_day else 0
+    return latest, cadence, median_runs >= 2, median_runs
+
+
+def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, *,
+                 ignored_set: set[str], mode: str, ignore_non_daily: bool,
+                 check_multi_daily: bool) -> Dependency:
+    """Turn one dependency's history into a fresh/stale verdict.
+
+    The default check is one rule: a qualifying write within `window` hours.
+    The options relax it. The caller can ignore a table by name. A table can
+    mark itself with a `view_scheduler.mode` property. A weekly or static table
+    is checked against its real schedule. A table that runs many times a day is
+    checked against a shorter window.
 
     A streaming table goes through the same check as a managed table. A
     streaming table on a schedule commits once per run, so between runs it is
@@ -232,20 +320,71 @@ def _verdict_for(ref, latest, cutoff: datetime, moment: datetime,
     fresh by definition is a false READY — the failure this gate exists to
     prevent.
     """
-    if isinstance(latest, Exception):
+    # An unreadable history fails closed. The gate cannot confirm the write, so
+    # it blocks. This holds even for a table that is marked as ignored.
+    if isinstance(history, Exception):
         return Dependency(ref.name, ref.kind, False,
-                          detail=f"history unreadable ({failure_category(latest)})")
+                          detail=f"history unreadable ({failure_category(history)})")
+    latest, cadence, multi_daily, median_runs = history
+    minutes = (None if latest is None
+               else max(0, int((moment - latest).total_seconds() // 60)))
+
+    # The caller, or the table itself, said "do not gate on this".
+    if ref.name in ignored_set:
+        return Dependency(ref.name, ref.kind, True, latest, minutes,
+                          detail="ignored by caller", cadence=cadence,
+                          multi_daily=multi_daily)
+    if mode in IGNORED_MODES:
+        return Dependency(ref.name, ref.kind, True, latest, minutes,
+                          detail=f"{mode} table — ignored", cadence=cadence,
+                          multi_daily=multi_daily)
+
+    # No qualifying refresh in history.
     if latest is None:
-        return Dependency(ref.name, ref.kind, False,
-                          detail="no qualifying refresh in history")
-    minutes = max(0, int((moment - latest).total_seconds() // 60))
+        if ignore_non_daily:
+            return Dependency(ref.name, ref.kind, True, None, None,
+                              detail="static table (no refresh in history) — ignored",
+                              cadence="never", multi_daily=False)
+        return Dependency(ref.name, ref.kind, False, None, None,
+                          detail="no qualifying refresh in history",
+                          cadence=cadence, multi_daily=multi_daily)
+
+    # A table that runs many times a day needs a shorter window.
+    if check_multi_daily and multi_daily:
+        eff_window = max(1, window // median_runs)
+        fresh = latest >= moment - timedelta(hours=eff_window)
+        detail = ("" if fresh
+                  else f"multi-daily ({median_runs}x/day) — older than the "
+                       f"{eff_window}h window")
+        return Dependency(ref.name, ref.kind, fresh, latest, minutes,
+                          detail=detail, cadence=cadence, multi_daily=True)
+
+    # A weekly or static table is checked against its own schedule.
+    if ignore_non_daily or mode == "weekly":
+        if cadence == "never":
+            return Dependency(ref.name, ref.kind, True, latest, minutes,
+                              detail="static table — ignored", cadence=cadence,
+                              multi_daily=multi_daily)
+        if cadence != "daily" or mode == "weekly":
+            weekly_cutoff = moment - timedelta(hours=168)
+            label = cadence if cadence not in ("daily", "never") else "weekly"
+            if latest >= weekly_cutoff:
+                return Dependency(ref.name, ref.kind, True, latest, minutes,
+                                  detail=f"schedule: {label}", cadence=cadence,
+                                  multi_daily=multi_daily)
+            return Dependency(
+                ref.name, ref.kind, False, latest, minutes,
+                detail=f"schedule: {label} — older than the 168h window",
+                cadence=cadence, multi_daily=multi_daily)
+
+    # The default daily check.
     fresh = latest >= cutoff
     return Dependency(ref.name, ref.kind, fresh, latest, minutes,
-                      "" if fresh else f"older than the {window}h window")
+                      "" if fresh else f"older than the {window}h window",
+                      cadence=cadence, multi_daily=multi_daily)
 
 
 def _dep_line(dep: Dependency, zone: ZoneInfo) -> str:
-    """One dependency line: mark, name, type, age, and any reason."""
     if dep.ok and dep.last_refresh is None:
         return f"note   {dep.name}  ({dep.kind})  {dep.detail}"
     mark = "fresh" if dep.ok else "stale"
@@ -254,7 +393,7 @@ def _dep_line(dep: Dependency, zone: ZoneInfo) -> str:
         return f"{line}  {dep.detail}"
     line += (f"  last refresh {_stamp(dep.last_refresh, zone)}"
              f" ({_human_age(dep.age_minutes)} ago)")
-    if not dep.ok and dep.detail:
+    if dep.detail:
         line += f" — {dep.detail}"
     return line
 

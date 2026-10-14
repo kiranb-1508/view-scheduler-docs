@@ -1,7 +1,7 @@
 """Phase 2 gate, unit half. Every operation class, plus the two branches that
 decide whether a live table reads as dormant."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -187,3 +187,50 @@ def test_summarize_carries_unknown_operations():
 def test_no_unknown_operations_on_a_clean_table():
     commits = [commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "04:00"))]
     assert summarize("c.s.t", commits, date(2026, 8, 6), 30, UTC).unknown_ops == ()
+
+
+# --- multi-daily tables ------------------------------------------------------
+
+def _write(day: int, hhmm: str, version: int) -> Commit:
+    return commit("WRITE", {"mode": "Overwrite"}, {"numOutputRows": "1"},
+                  f.at(f"2026-08-{day:02d}", hhmm), version=version)
+
+
+def test_one_or_two_rerun_days_are_not_multi_daily():
+    """A daily table with a couple of reruns still has median 1."""
+    from view_scheduler.history import daily_slot_times, looks_multi_daily
+    commits = []
+    for day in range(1, 11):
+        commits.append(_write(day, "04:00", day))
+        if day in (2, 7):
+            commits.append(_write(day, "16:00", 100 + day))
+    today = date(2026, 8, 11)
+    assert not looks_multi_daily(commits, today, 30, UTC)
+    assert daily_slot_times(commits, today, 30, UTC) == ()
+
+
+def test_three_writes_a_day_is_multi_daily_with_three_slots():
+    from view_scheduler.history import (
+        daily_slot_times, looks_continuous, looks_multi_daily,
+    )
+    commits = [
+        _write(day, hhmm, day * 10 + i)
+        for day in range(1, 11)
+        for i, hhmm in enumerate(("02:00", "09:00", "17:00"))
+    ]
+    today = date(2026, 8, 11)
+    assert looks_multi_daily(commits, today, 30, UTC)
+    assert not looks_continuous(commits, today, 30, UTC)
+    assert daily_slot_times(commits, today, 30, UTC) == (
+        time(2, 0), time(9, 0), time(17, 0))
+
+
+def test_summarize_carries_the_multi_daily_fields():
+    commits = [
+        _write(day, hhmm, day * 10 + i)
+        for day in range(1, 11)
+        for i, hhmm in enumerate(("02:00", "09:00", "17:00"))
+    ]
+    summary = summarize("c.s.t", commits, date(2026, 8, 11), 30, UTC)
+    assert summary.multi_daily
+    assert summary.daily_slots == (time(2, 0), time(9, 0), time(17, 0))
