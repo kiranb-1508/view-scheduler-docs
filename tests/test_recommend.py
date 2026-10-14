@@ -134,3 +134,48 @@ def test_only_the_wrapping_number_is_marked():
     result = recommend([a], buffer_min=15)
     assert result.safe == time(0, 5) and result.safe_next_day
     assert result.earlier == time(20, 15) and not result.earlier_next_day
+
+
+# --- outliers ----------------------------------------------------------------
+
+OUTLIER_DAYS = [date(2026, 8, d) for d in range(1, 13)]
+
+
+def outlier_history(name):
+    """10 ordinary days at 04:00, 2 late days at 06:10."""
+    finish = {
+        d: f.at(d.isoformat(), "06:10" if d.day in (5, 9) else "04:00")
+        for d in OUTLIER_DAYS
+    }
+    return TableHistory(name, finish)
+
+
+def test_outliers_are_named_and_set_safe_apart_from_the_typical_time():
+    result = recommend([outlier_history("c.s.x")], buffer_min=15)
+    assert result.safe == time(6, 25), "safe still covers the late days"
+    assert result.safe_without_outliers == time(4, 15)
+    assert result.usual == time(4, 15)
+    assert set(result.outlier_days) == {date(2026, 8, 5), date(2026, 8, 9)}
+
+
+def test_two_outlier_days_move_earlier_to_the_typical_time():
+    """Without this, ordered[-2] would be the other late day (06:25)."""
+    result = recommend([outlier_history("c.s.x")], buffer_min=15)
+    assert result.earlier == time(4, 15)
+    assert result.earlier != result.safe
+
+
+def test_a_clean_table_has_no_outliers():
+    result = recommend([ORDERS, CUSTOMERS], buffer_min=15)
+    assert result.outlier_days == ()
+    assert result.safe_without_outliers == result.safe
+
+
+def test_a_multi_daily_table_carries_its_slots_and_safe_slots():
+    md = TableHistory("c.s.md", {d: f.at(d.isoformat(), "02:00") for d in DAYS},
+                      multi_daily=True,
+                      daily_slots=(time(2, 0), time(9, 0), time(17, 0)))
+    row = recommend([md], buffer_min=15).rows[0]
+    assert row.multi_daily and not row.continuous
+    assert row.daily_slots == (time(2, 0), time(9, 0), time(17, 0))
+    assert row.safe_slots == (time(2, 15), time(9, 15), time(17, 15))

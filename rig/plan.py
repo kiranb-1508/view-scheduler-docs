@@ -20,12 +20,14 @@ from datetime import date, timedelta
 
 SCHEMA = "workspace.sched_rig"
 
-#: First and last day the rig writes, inclusive. 30 days.
+#: First and last day the rig writes, inclusive. 61 days, 2026-09-01 to
+#: 2026-10-31. Extended from the original 30-day window so the jobs keep
+#: generating history through the end of October.
 # Starts the day after deployment. The smoke-test run used to prove the job
 # works wrote outside its slot, and those commits would not match the oracle;
-# beginning at midnight means all 30 days come from real scheduled runs.
+# beginning at midnight means all 61 days come from real scheduled runs.
 RIG_START = date(2026, 9, 1)
-RIG_DAYS = 30
+RIG_DAYS = 61
 RIG_END = RIG_START + timedelta(days=RIG_DAYS - 1)
 
 #: Slots, in Asia/Kolkata. The job schedules use these exact strings.

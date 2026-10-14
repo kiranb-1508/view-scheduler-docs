@@ -109,3 +109,62 @@ def test_default_workspace_requires_the_environment(monkeypatch):
     monkeypatch.delenv("WAREHOUSE_ID", raising=False)
     with pytest.raises(ValueError, match="WAREHOUSE_ID"):
         advise("c.s.v", None, CONFIG, today=TODAY, quiet=True)
+
+
+# --- outliers and multi-daily tables -----------------------------------------
+
+def multi_workspace(day_slots):
+    """day_slots: {'c.s.t1': {'2026-08-04': ['02:00', '09:00', '17:00']}}"""
+    tables = {"c.s.v": f.uc_view("c.s.v", list(day_slots)),
+              **{name: f.uc_table(name) for name in day_slots}}
+    history = {
+        name: [commit(day, hhmm)
+               for day, slots in day_times.items() for hhmm in slots]
+        for name, day_times in day_slots.items()
+    }
+    return FakeWorkspace(tables=tables, history=history)
+
+
+def test_advice_exposes_the_outlier_aware_times():
+    days = [f"2026-08-{d:02d}" for d in range(1, 13)]
+    late = {"2026-08-05", "2026-08-09"}
+    times = {"c.s.t1": {day: ("06:10" if day in late else "04:00")
+                        for day in days}}
+    advice = advise("c.s.v", workspace(times), CONFIG,
+                    today=date(2026, 8, 13), quiet=True)
+    assert advice.safe_time == time(6, 25)
+    assert advice.safe_without_outliers == time(4, 15)
+    assert advice.usual_time == time(4, 15)
+    assert set(advice.outlier_days) == {date(2026, 8, 5), date(2026, 8, 9)}
+    assert "WITHOUT OUTLIERS" in advice.render()
+
+
+def test_advice_to_dict_carries_the_outlier_fields():
+    days = [f"2026-08-{d:02d}" for d in range(1, 13)]
+    late = {"2026-08-05", "2026-08-09"}
+    times = {"c.s.t1": {day: ("06:10" if day in late else "04:00")
+                        for day in days}}
+    payload = advise("c.s.v", workspace(times), CONFIG,
+                     today=date(2026, 8, 13), quiet=True).to_dict()
+    assert payload["safe_without_outliers"] == "04:15"
+    assert payload["usual_time"] == "04:15"
+    assert payload["outlier_days"] == ["2026-08-05", "2026-08-09"]
+    json.dumps(payload)   # must not raise
+
+
+def test_advice_reports_multi_daily_slots():
+    slots = {
+        "c.s.t1": {f"2026-08-{d:02d}": ["02:00", "09:00", "17:00"]
+                   for d in range(1, 11)}
+    }
+    advice = advise("c.s.v", multi_workspace(slots), CONFIG,
+                    today=date(2026, 8, 11), quiet=True)
+    row = advice.dependencies[0]
+    assert row.multi_daily is True
+    assert row.daily_slots == (time(2, 0), time(9, 0), time(17, 0))
+    assert row.safe_slots == (time(2, 15), time(9, 15), time(17, 15))
+    assert "refreshes 3 times a day" in advice.render()
+    payload = advice.to_dict()
+    assert payload["dependencies"][0]["multi_daily"] is True
+    assert payload["dependencies"][0]["daily_slots"] == ["02:00", "09:00", "17:00"]
+    assert payload["dependencies"][0]["safe_slots"] == ["02:15", "09:15", "17:15"]

@@ -19,11 +19,7 @@ class Commit:
 
 @dataclass(frozen=True)
 class Skipped:
-    """A dependency we did not measure, and why. Never dropped silently.
-
-    A blocker stops the view. A note is only reported. The advisor keeps both
-    in one list and calls it `unreadable`.
-    """
+    """A dependency that could not be resolved, and why. Never dropped silently."""
 
     name: str
     reason: str
@@ -38,3 +34,5 @@ class TableHistory:
     metrics_degraded: bool = False
     continuous: bool = False       # refreshed many times a day; finish is a floor
     unknown_ops: tuple = ()        # operation names we could not classify
+    multi_daily: bool = False      # refreshed 2+ times on a typical active day
+    daily_slots: tuple = ()        # median finish times (datetime.time) per daily run

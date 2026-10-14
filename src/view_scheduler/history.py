@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Iterable
 
 from .models import Commit, TableHistory
@@ -13,6 +13,10 @@ from .models import Commit, TableHistory
 #: refreshed too often for "first commit of the day" to mean "when it was ready"
 #: — it looks continuous (streaming, CDC, micro-batch). Flagged, not modelled.
 CONTINUOUS_COMMITS_PER_DAY = 6
+
+#: A table with at least 2 qualifying commits on a typical active day (median >= 2)
+#: is a multi-daily table. One or two days with reruns keep median == 1.
+MULTI_DAILY_COMMITS_PER_DAY = 2
 
 #: Names that always mean the table was rebuilt from scratch.
 FULL_REPLACE = {
@@ -134,18 +138,59 @@ def looks_continuous(commits: Iterable[Commit], today: date, days: int,
     return statistics.median(per_day.values()) >= CONTINUOUS_COMMITS_PER_DAY
 
 
+def looks_multi_daily(commits: Iterable[Commit], today: date, days: int,
+                      tz) -> bool:
+    """True when the median qualifying commits per active day >= 2."""
+    per_day = qualifying_per_day(commits, today, days, tz)
+    if not per_day:
+        return False
+    return statistics.median(per_day.values()) >= MULTI_DAILY_COMMITS_PER_DAY
+
+
+def daily_slot_times(commits: Iterable[Commit], today: date, days: int,
+                     tz) -> tuple[time, ...]:
+    """Median clock time of each daily run, for a multi-daily table.
+
+    Returns () when the table is not multi-daily, or when it looks continuous.
+    A continuous table has no clean per-run slots, so we do not invent any.
+    """
+    if not looks_multi_daily(commits, today, days, tz):
+        return ()
+    if looks_continuous(commits, today, days, tz):
+        return ()
+
+    cutoff = today - timedelta(days=days)
+    by_day: dict[date, list[datetime]] = {}
+    for commit in sorted(commits, key=lambda c: c.timestamp):
+        if not qualifying(commit):
+            continue
+        local = commit.timestamp.astimezone(tz)
+        day = local.date()
+        if day <= cutoff or day > today:
+            continue
+        by_day.setdefault(day, []).append(local)
+    if not by_day:
+        return ()
+
+    k = int(statistics.median(
+        len(moments) for moments in by_day.values()))
+    slots: list[time] = []
+    for i in range(k):
+        run = [moments[i] for moments in by_day.values() if len(moments) > i]
+        secs = [m.hour * 3600 + m.minute * 60 + m.second for m in run]
+        middle = int(statistics.median(secs))
+        slots.append((datetime.min + timedelta(seconds=middle)).time())
+    return tuple(slots)
+
+
 def summarize(name: str, commits: list[Commit], today: date, days: int,
               tz) -> TableHistory:
-    """Roll one table's commits into the shape the advisor needs.
-
-    Keeps the first qualifying finish of each local day, and flags the two
-    facts that weaken a number: writes with no metrics, and a table that runs
-    so often that its "finish" is only a floor.
-    """
     return TableHistory(
         name=name,
         finish_times=finish_times(commits, today, days, tz),
         metrics_degraded=is_degraded(commits),
         continuous=looks_continuous(commits, today, days, tz),
         unknown_ops=unknown_operations(commits),
+        multi_daily=looks_multi_daily(commits, today, days, tz),
+        daily_slots=daily_slot_times(commits, today, days, tz),
     )

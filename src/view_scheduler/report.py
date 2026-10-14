@@ -37,10 +37,6 @@ def _too_early(result: Recommendation) -> int:
 
 def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
            timezone: str) -> str:
-    """The advice report: the two times, the evidence, and the warnings.
-
-    Plain words only. A reader must know what to do after one read.
-    """
     lines: list[str] = []
     deps = len(result.rows)
     lines.append(f"VIEW   {view}")
@@ -54,6 +50,13 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
             f"{_day_mark(result.safe_next_day)}"
             f"    safe — every job had finished, on all "
             f"{_plural(result.n_days, 'day')}")
+        if (result.outlier_days and result.safe_without_outliers is not None
+                and result.safe_without_outliers != result.safe):
+            lines.append(
+                f"       WITHOUT OUTLIERS  {_hhmm(result.safe_without_outliers)}"
+                f"{_day_mark(result.safe_without_outliers_next_day)}"
+                f"    excludes {_plural(len(result.outlier_days), 'outlier day')}"
+            )
         if result.earlier and result.earlier != result.safe:
             early = _too_early(result)
             note = (f"one job had not finished yet, on {early} of "
@@ -109,11 +112,6 @@ def all_clear_series(result: Recommendation) -> list[str]:
 
 
 def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
-    """Every reason to distrust the two times, one line each.
-
-    A warning never changes a number. It tells the reader what the number
-    cannot say.
-    """
     out: list[str] = []
 
     for row in sorted(result.rows, key=lambda r: r.name):
@@ -133,6 +131,14 @@ def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
             out.append(f"!  {row.name} runs many times a day — the time above "
                        f"is only its first run, not when it is fully caught "
                        f"up. Check before using an early start.")
+        if row.multi_daily and not row.continuous and row.daily_slots:
+            slots_txt = ", ".join(_hhmm(t) for t in row.daily_slots)
+            safe_txt = ", ".join(_hhmm(t) for t in row.safe_slots)
+            out.append(
+                f"!  {row.name} refreshes {len(row.daily_slots)} times a day "
+                f"(usually {slots_txt}; safe at {safe_txt}) — the schedule above "
+                f"uses its first run."
+            )
         if row.degraded:
             out.append(f"!  {row.name} writes no row counts — we can see it "
                        f"ran, but not that it wrote data. A missed day cannot "

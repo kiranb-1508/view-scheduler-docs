@@ -13,8 +13,8 @@ import plan
 
 
 def test_window_is_exactly_thirty_days():
-    assert len(plan.days()) == 30
-    assert plan.RIG_END - plan.RIG_START == timedelta(days=29)
+    assert len(plan.days()) == plan.RIG_DAYS == 61
+    assert plan.RIG_END - plan.RIG_START == timedelta(days=plan.RIG_DAYS - 1)
     assert plan.is_active(plan.RIG_START) and plan.is_active(plan.RIG_END)
     assert not plan.is_active(plan.RIG_END + timedelta(days=1))
 
@@ -42,17 +42,18 @@ def test_nothing_is_written_outside_the_window():
 
 def test_zero_row_write_counts_whether_overwrite_or_append():
     """Both tables write 0 rows on the same one-third of days. Under the rule
-    that any write is a refresh, both show all 30 days — the mode does not
+    that any write is a refresh, both show all 61 days — the mode does not
     change the verdict, only the class."""
     overwrite = plan.expected_finishes("t_overwrite_zero")
     append = plan.expected_finishes("t_append_zero")
-    assert len(overwrite) == 30
-    assert len(append) == 30, "a zero-row append still means the pipeline ran"
+    assert len(overwrite) == plan.RIG_DAYS
+    assert len(append) == plan.RIG_DAYS, "a zero-row append still means the pipeline ran"
 
 
 def test_maintenance_only_days_are_not_refreshes():
     finishes = plan.expected_finishes("t_maintenance_only")
-    assert len(finishes) == 10, "a real write every third day, and only those"
+    assert len(finishes) == (plan.RIG_DAYS + 2) // 3, \
+        "a real write every third day, and only those"
     for day in plan.days():
         writes = [w for w in plan.writes_for("04:00", day)
                   if w.table == "t_maintenance_only"]
@@ -69,13 +70,13 @@ def test_weekly_table_only_runs_on_mondays():
 
 def test_flaky_table_skips_exactly_three_days():
     assert len(plan.FLAKY_SKIPS) == 3
-    assert len(plan.expected_finishes("t_flaky")) == 27
+    assert len(plan.expected_finishes("t_flaky")) == plan.RIG_DAYS - 3
 
 
 def test_late_tail_runs_late_on_exactly_two_days():
     assert len(plan.LATE_DAYS) == 2
     finishes = plan.expected_finishes("t_daily_late_tail")
-    assert len(finishes) == 30
+    assert len(finishes) == plan.RIG_DAYS
     assert sorted(d for d, slot in finishes.items() if slot == "06:10") == \
         sorted(plan.LATE_DAYS)
 

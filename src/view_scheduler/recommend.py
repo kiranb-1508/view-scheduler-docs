@@ -31,6 +31,9 @@ class DependencyRow:
     continuous: bool = False        # refreshed many times a day; finish is a floor
     outlier_day: date | None = None # the day that pins `worst`, if it is an outlier
     unknown_ops: tuple = ()         # operation names we could not classify
+    multi_daily: bool = False       # refreshed 2+ times on a typical active day
+    daily_slots: tuple = ()         # median finish times per daily run
+    safe_slots: tuple = ()          # daily_slots plus the buffer
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,11 @@ class Recommendation:
     # reads ~24h earlier than meant.
     safe_next_day: bool = False
     earlier_next_day: bool = False
+    safe_without_outliers: time | None = None
+    safe_without_outliers_next_day: bool = False
+    usual: time | None = None
+    usual_next_day: bool = False
+    outlier_days: tuple[date, ...] = ()
 
 
 def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
@@ -63,8 +71,8 @@ def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
     return ",".join(WEEKDAYS[d] for d in seen)
 
 
-def dependency_rows(histories: Sequence[TableHistory],
-                    span: Sequence[date]) -> list[DependencyRow]:
+def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
+                    buffer_min: int = 0) -> list[DependencyRow]:
     """One report row per upstream table: its pattern, its usual, its worst."""
     rows: list[DependencyRow] = []
     for history in histories:
@@ -83,6 +91,11 @@ def dependency_rows(histories: Sequence[TableHistory],
         # max of the clock times, not of the datetimes: the latest moment of
         # day, which may not be on the latest day.
         worst = max((t.time() for t in times), default=None)
+        safe_slots = tuple(
+            (datetime.combine(date(2000, 1, 1), t)
+             + timedelta(minutes=buffer_min)).time()
+            for t in history.daily_slots
+        )
         rows.append(DependencyRow(
             name=history.name,
             refreshes=label,
@@ -94,8 +107,14 @@ def dependency_rows(histories: Sequence[TableHistory],
             continuous=history.continuous,
             outlier_day=_outlier_day(history.finish_times, usual, worst),
             unknown_ops=history.unknown_ops,
+            multi_daily=history.multi_daily,
+            daily_slots=history.daily_slots,
+            safe_slots=safe_slots,
         ))
     return rows
+
+
+build_rows = dependency_rows
 
 
 def _to_seconds(t) -> int:
@@ -118,6 +137,25 @@ def _outlier_day(finish_times: dict, usual: time | None,
         return None
     latest = max(finish_times.values(), key=lambda v: v.time())
     return latest.date()
+
+
+def _outlier_dates(finish_times: dict) -> tuple[date, ...]:
+    """All dates in finish_times that stand out above the median.
+
+    The scale is the mean absolute deviation. A small sample whose late days
+    are a large share of the whole lifts that scale, so those days are not
+    called outliers. Only a rare, clearly separated run flags.
+    """
+    if len(finish_times) < 4:
+        return ()
+    seconds = [_to_seconds(v.time()) for v in finish_times.values()]
+    median = statistics.median(seconds)
+    spread = statistics.mean([abs(s - median) for s in seconds])
+    return tuple(sorted(
+        day for day, dt in finish_times.items()
+        if _to_seconds(dt.time()) - median > OUTLIER_FLOOR_MIN * 60
+        and _to_seconds(dt.time()) - median > OUTLIER_MAD_K * spread
+    ))
 
 
 def _median_time(times: Sequence[datetime]) -> time | None:
@@ -147,7 +185,7 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
         common &= set(history.finish_times)
 
     span = observed_span(histories)
-    rows = dependency_rows(histories, span)
+    rows = dependency_rows(histories, span, buffer_min)
 
     if not common:
         return Recommendation(None, None, 0, len(span), rows, {})
@@ -158,12 +196,28 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     # Sort by clock time, not datetime — latest time of day, not most recent date.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe, safe_next = _add_buffer(ordered[-1], buffer_min)
-    if len(ordered) >= 2:
+
+    outliers = _outlier_dates(all_clear)
+    normal_moments = (
+        [dt for day, dt in all_clear.items() if day not in outliers]
+        or list(all_clear.values())
+    )
+    ordered_normal = sorted(normal_moments, key=lambda m: m.time())
+    safe_no_out, safe_no_out_next = _add_buffer(ordered_normal[-1], buffer_min)
+
+    usual_clock = _median_time(normal_moments)
+    usual, usual_next = _add_buffer(
+        datetime.combine(ordered_normal[-1].date(), usual_clock), buffer_min)
+
+    if len(outliers) >= 2:
+        earlier, earlier_next = safe_no_out, safe_no_out_next
+    elif len(ordered) >= 2:
         earlier, earlier_next = _add_buffer(ordered[-2], buffer_min)
     else:
         earlier, earlier_next = safe, safe_next
     return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
-                          safe_next, earlier_next)
+                          safe_next, earlier_next, safe_no_out, safe_no_out_next,
+                          usual, usual_next, outliers)
 
 
 def _add_buffer(moment: datetime, minutes: int) -> tuple[time, bool]:
@@ -174,3 +228,6 @@ def _add_buffer(moment: datetime, minutes: int) -> tuple[time, bool]:
     """
     shifted = moment + timedelta(minutes=minutes)
     return shifted.time(), shifted.date() != moment.date()
+
+
+_plus = _add_buffer
