@@ -1,6 +1,6 @@
 """Phase 4 gate: warnings appear only when they apply. Plain words only."""
 
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 
 from view_scheduler.models import Skipped, TableHistory
 from view_scheduler.recommend import recommend
@@ -99,6 +99,59 @@ def test_outlier_day_is_named_when_worst_is_far_above_usual():
     assert "Without it you could use" in text
 
 
+def test_the_outlier_warning_names_the_with_outliers_time():
+    """The late day sets the WITH OUTLIERS time, not SCHEDULE AT. SCHEDULE AT
+    shows safe_without_outliers, which is a different number."""
+    result = recommend([_outlier_table()], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "sets the WITH OUTLIERS time" in text
+    assert "sets the safe time" not in text
+    # Two days stand out here, so the advice is plural.
+    assert "Without them you could use 04:15" in text
+
+
+def test_the_outlier_warning_says_one_day_when_only_one_stands_out():
+    days = [date(2026, 8, d) for d in range(1, 16)]
+    times = {d: "04:00" for d in days}
+    times[days[6]] = "05:30"
+    result = recommend([_hist("c.s.orders", times)], 15)
+    assert len(result.outlier_days) == 1
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "that one day sets the WITH OUTLIERS time" in text
+
+
+def test_the_outlier_warning_fits_a_count_of_two_or_more():
+    """Two days stand out, but only one row pins `worst`. The wording must not
+    call a pair of days 'that one day'."""
+    result = recommend([_outlier_table()], 15)
+    assert len(result.outlier_days) == 2
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "that one day" not in text
+    assert "2 outlier days set the WITH OUTLIERS time" in text
+
+
+def test_the_outlier_advice_keeps_the_singular_pronoun_for_one_day():
+    """One day stands out, so the closing advice stays singular."""
+    days = [date(2026, 8, d) for d in range(1, 16)]
+    times = {d: "04:00" for d in days}
+    times[days[6]] = "05:30"
+    result = recommend([_hist("c.s.orders", times)], 15)
+    assert len(result.outlier_days) == 1
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "Without it you could use" in text
+    assert "Without them" not in text
+
+
+def test_the_outlier_advice_uses_the_plural_pronoun_for_two_or_more_days():
+    """Two days set the WITH OUTLIERS time, so 'it' is wrong. The advice must
+    read 'Without them' and still name the earlier time."""
+    result = recommend([_outlier_table()], 15)
+    assert len(result.outlier_days) == 2
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "Without them you could use 04:15" in text
+    assert "Without it you could use" not in text
+
+
 def test_a_stable_table_is_not_flagged_as_an_outlier():
     days = [date(2026, 8, d) for d in range(1, 16)]
     times = {d: f"04:0{i % 6}" for i, d in enumerate(days)}
@@ -166,18 +219,26 @@ def test_the_day_by_day_series_is_rendered():
         assert day.isoformat() in text, f"{day} missing from the evidence"
 
 
-def test_the_series_names_which_days_set_the_two_numbers():
+def test_the_series_names_the_day_that_sets_the_printed_time():
+    """One mark, on the day behind SCHEDULE AT. No day sets `earlier`: it is
+    the median of the window. The mark shows the raw finish, so the printed
+    number must be that raw time plus the buffer."""
     a = TableHistory("c.s.a", {
-        DAYS[0]: f.at(DAYS[0].isoformat(), "06:10"),   # latest
-        DAYS[1]: f.at(DAYS[1].isoformat(), "05:30"),   # second latest
+        DAYS[0]: f.at(DAYS[0].isoformat(), "06:10"),   # latest, sets the time
+        DAYS[1]: f.at(DAYS[1].isoformat(), "05:30"),
         DAYS[2]: f.at(DAYS[2].isoformat(), "04:00"),
     })
-    text = render("c.s.v", recommend([a], 15), [], "Asia/Kolkata")
-    lines = [ln for ln in text.splitlines()
-             if "sets the safe time" in ln or "sets the earlier time" in ln]
-    assert len(lines) == 2
-    assert DAYS[0].isoformat() in lines[0] and "06:10" in lines[0]
-    assert DAYS[1].isoformat() in lines[1] and "05:30" in lines[1]
+    result = recommend([a], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    marks = [ln for ln in text.splitlines() if "←" in ln]
+    assert not [ln for ln in marks if "sets the earlier time" in ln], \
+        "earlier is a median, so no single day sets it"
+    assert len(marks) == 1, marks
+    assert "sets the SCHEDULE AT time" in marks[0]
+    assert date.fromisoformat(marks[0].split()[0]) == DAYS[0]
+    raw = time.fromisoformat(marks[0].split()[2])
+    assert (datetime.combine(date(2000, 1, 1), raw)
+            + timedelta(minutes=15)).time() == result.safe
 
 
 def test_no_series_when_there_is_no_overlapping_day():
@@ -197,15 +258,68 @@ def _outlier_table(name="c.s.x"):
     })
 
 
-def test_outliers_get_a_without_outliers_line():
+def test_the_headline_puts_the_outlier_free_time_first():
+    """With outlier days, SCHEDULE AT is the time that holds on the normal
+    days. WITH OUTLIERS then covers every day. The old layout was inverted and
+    printed the same clock time twice."""
+    days = [date(2026, 8, d) for d in range(1, 16)]
+    slow = {date(2026, 8, 6), date(2026, 8, 12)}      # 20 minutes late, normal
+    late = {date(2026, 8, 5), date(2026, 8, 9)}       # reruns, outliers
+    times = {d: ("06:10" if d in late else "04:20" if d in slow else "04:00")
+             for d in days}
+    text = render("c.s.v", recommend([_hist("c.s.x", times)], 15), [],
+                  "Asia/Kolkata")
+    lines = text.splitlines()
+    assert ("       SCHEDULE AT  04:35    safe on 13 of 15 days — "
+            "excludes 2 outlier days") in lines
+    assert "       WITH OUTLIERS  06:25    safe on all 15 days" in lines
+    assert any(line.startswith("       EARLIER      04:15    ") for line in lines)
+
+
+def test_the_headline_keeps_its_old_shape_without_outliers():
+    result = recommend([history("c.s.a")], 15)
+    text = render("c.s.v", result, [], "Asia/Kolkata")
+    assert "SCHEDULE AT  04:15" in text
+    assert "safe — every job had finished, on all 10 days" in text
+    assert "WITH OUTLIERS" not in text
+
+
+def test_outliers_get_a_with_outliers_line():
     text = render("c.s.v", recommend([_outlier_table()], 15), [], "Asia/Kolkata")
-    assert "WITHOUT OUTLIERS  04:15" in text
+    assert "SCHEDULE AT  04:15" in text
+    assert "WITH OUTLIERS  06:25" in text
     assert "excludes 2 outlier days" in text
 
 
-def test_a_clean_table_gets_no_without_outliers_line():
+def test_a_clean_table_gets_no_with_outliers_line():
     result = recommend([history("c.s.a")], 15)
-    assert "WITHOUT OUTLIERS" not in render("c.s.v", result, [], "Asia/Kolkata")
+    assert "WITH OUTLIERS" not in render("c.s.v", result, [], "Asia/Kolkata")
+
+
+def test_the_evidence_marks_name_the_day_that_sets_each_printed_time():
+    """Days 5 and 9 are the outliers, so they are the two latest days. With the
+    new rule `earlier` is the median of the normal days, so no single day sets
+    it. The mark must not sit on an outlier day."""
+    result = recommend([_outlier_table()], 15)
+    evidence = [ln for ln in render("c.s.v", result, [], "Asia/Kolkata").splitlines()
+                if "←" in ln]
+    earlier_marks = [ln for ln in evidence if "sets the earlier time" in ln]
+    assert not earlier_marks, "earlier is a median now, so no one day sets it"
+
+    schedule = next(ln for ln in evidence if "sets the SCHEDULE AT time" in ln)
+    schedule_day = date.fromisoformat(schedule.split()[0])
+    assert schedule_day not in result.outlier_days
+    # The line shows the raw finish. The printed number is that time plus the
+    # buffer, so this day really produces the printed SCHEDULE AT value.
+    raw = time.fromisoformat(schedule.split()[2])
+    assert (datetime.combine(date(2000, 1, 1), raw)
+            + timedelta(minutes=15)).time() == result.safe_without_outliers
+
+    worst = next(ln for ln in evidence if "sets the WITH OUTLIERS time" in ln)
+    assert date.fromisoformat(worst.split()[0]) in result.outlier_days
+    worst_raw = time.fromisoformat(worst.split()[2])
+    assert (datetime.combine(date(2000, 1, 1), worst_raw)
+            + timedelta(minutes=15)).time() == result.safe
 
 
 # --- multi-daily tables ------------------------------------------------------

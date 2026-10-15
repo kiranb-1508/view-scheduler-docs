@@ -205,7 +205,7 @@ td code{background:transparent;padding:0;font-size:.83em}
           <line x1="360" y1="550" x2="360" y2="568" stroke="currentColor" stroke-width="1.4" marker-end="url(#ah2)"/>
 
           <rect x="160" y="570" width="400" height="34" fill="none" stroke="#1E6F8C" stroke-width="1.8"/>
-          <text x="360" y="592" text-anchor="middle" font-size="12" font-weight="600">safe = max + buffer&#160;&#160;·&#160;&#160;earlier = 2nd max + buffer</text>
+          <text x="360" y="592" text-anchor="middle" font-size="12" font-weight="600">safe = max + buffer&#160;&#160;·&#160;&#160;earlier = median + buffer</text>
         </g>
       </svg>
     </div>
@@ -303,7 +303,9 @@ def recommend(tables, buffer_min=15):
     # that looks entirely plausible.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
     safe = ordered[-1] + buffer_min
-    earlier = ordered[-2] + buffer_min if len(ordered) &gt;= 2 else safe
+    # earlier is the typical day: the median of the normal days, plus the
+    # buffer. The median ignores the reruns that push a rare day out.
+    earlier = median(all_clear.values()) + buffer_min
     return safe, earlier, len(days)</code></pre>
   <div class="note warn">
     <span class="tag">Watch the midnight rollover</span>
@@ -312,7 +314,7 @@ def recommend(tables, buffer_min=15):
   <p><strong>Read the intersection carefully.</strong> A day only counts if every dependency refreshed on it. Days where something didn't run are excluded from the timing numbers and reported instead in the <em>missed</em> column — because a table that misses days is a reliability problem, and no schedule time fixes it.</p>
   <div class="note">
     <span class="tag">Where the two numbers come from</span>
-    <p><code>all_clear[-1]</code> and <code>all_clear[-2]</code> are the worst and second-worst days. Those are the same order statistics the earlier spec dressed up as 95% and 99% coverage tiers — with ~21 usable days the maximum is roughly a 95% figure anyway, so the honest presentation is just "worst day in 30" and "worst but one".</p>
+    <p><code>all_clear[-1]</code> is the worst day, and <code>median(all_clear)</code> is the typical day. The worst day is the same order statistic the earlier spec dressed up as a 95% coverage tier — with ~21 usable days the maximum is roughly a 95% figure anyway, so the honest presentation is just "worst day in 30". The typical day needs no confidence language: half the days finish sooner.</p>
   </div>
 
   <h3>Worked example</h3>
@@ -328,12 +330,12 @@ def recommend(tables, buffer_min=15):
     </table>
   </div>
   <p>Wednesday was bad because <code>customers</code> ran late; Thursday because <code>orders</code> did. You wait for the slowest table each day, not the average — the same way you leave when the last friend arrives, not the average friend.</p>
-  <p>Sort those five all-clear times worst-first: <code>06:10, 05:30, 04:10, 04:00, 04:00</code>. Then:</p>
+  <p>Sort those five all-clear times: <code>04:00, 04:00, 04:10, 05:30, 06:10</code>. Then:</p>
   <ul>
     <li><strong>safe</strong> = worst + 15 min = <strong>06:25</strong> — would have worked on all five days.</li>
-    <li><strong>earlier</strong> = second-worst + 15 min = <strong>05:45</strong> — 40 minutes earlier, but Wednesday would have failed.</li>
+    <li><strong>earlier</strong> = typical day + 15 min = <strong>04:25</strong> — the middle of the five is 04:10. It would have failed on Wednesday and Thursday, the two days that finished above it.</li>
   </ul>
-  <p>Over 30 days rather than 5, the earlier time fails roughly one day a month. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
+  <p>Over 30 days rather than 5, the earlier time is the midpoint of the run, so about half the days finish after it. That makes it the tighter of the two times, never a worst case. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
 </section>
 
 <hr>

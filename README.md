@@ -12,7 +12,7 @@ VIEW   sales_gold.customer_360
        8 dependencies · last 30 days · times Asia/Kolkata
 
        SCHEDULE AT  06:25    safe — every job had finished, on all 30 days
-       EARLIER      05:45    one job had not finished yet, on 1 of 30 days
+       EARLIER      04:25    one job had not finished yet, on 1 of 30 days
 ```
 
 ## Read this before you rely on it
@@ -25,7 +25,7 @@ refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
-commit history. Until that completes, treat output as indicative. Hence `0.4.0`.
+commit history. Until that completes, treat output as indicative. Hence `0.6.0`.
 
 ## Install
 
@@ -45,7 +45,7 @@ Build and upload a release:
 
 ```bash
 python -m build --wheel
-databricks fs cp dist/view_scheduler-0.4.0-py3-none-any.whl \
+databricks fs cp dist/view_scheduler-0.6.0-py3-none-any.whl \
   dbfs:/Volumes/<catalog>/<schema>/libs/
 ```
 
@@ -54,7 +54,7 @@ Keep old versions in the volume so running jobs can stay pinned.
 Then, in a notebook:
 
 ```python
-%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.4.0-py3-none-any.whl
+%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.6.0-py3-none-any.whl
 dbutils.library.restartPython()
 ```
 
@@ -64,7 +64,7 @@ Or as a job library, including from a DAB:
 tasks:
   - task_key: recommend
     libraries:
-      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.4.0-py3-none-any.whl
+      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.6.0-py3-none-any.whl
 ```
 
 ### From source
@@ -92,12 +92,15 @@ As a library:
 from view_scheduler import advise
 
 advice = advise("sales.gold.customer_360")   # WAREHOUSE_ID from the env
-advice.safe_time      # datetime.time(6, 25)  or None
-advice.earlier_time   # datetime.time(5, 45)  or None
-advice.next_day       # True when the (+1 day) marker applies
-advice.dependencies   # one row per upstream job
-advice.to_dict()      # JSON, for a job log
-print(advice)         # the report
+advice.safe_time              # datetime.time(6, 25)  or None
+advice.safe_without_outliers  # the SCHEDULE AT time, or None
+advice.usual_time             # the typical day's finish, plus the buffer
+advice.earlier_time           # datetime.time(4, 25)  or None
+advice.outlier_days           # the dates that force the WITH OUTLIERS line
+advice.next_day               # True when the (+1 day) marker applies
+advice.dependencies           # one row per upstream job
+advice.to_dict()              # JSON, for a job log
+print(advice)                 # the report
 ```
 
 `advise` prints the report and returns an `Advice`. Nothing is dropped
@@ -109,6 +112,57 @@ silently — anything unreadable comes back in `advice.unreadable` with a reason
 Four settings: `days_history` (30), `buffer_min` (15), `timezone`
 (`Asia/Kolkata`), and `fresh_hours` (24) — the gate's window. There is a
 standing rule to ask before adding a fifth.
+
+### The report: three times, not two
+
+A table with outlier days gets three lines. An outlier day is a day when a
+rerun pushed the last job much later than usual.
+
+```
+       SCHEDULE AT  04:35    safe on 13 of 15 days — excludes 2 outlier days
+       WITH OUTLIERS  06:25    safe on all 15 days
+       EARLIER      04:15    one job had not finished yet, on 4 of 15 days
+```
+
+- `SCHEDULE AT` — the latest finish of a normal day, plus the buffer. It
+  leaves out the outlier days. Schedule this time.
+- `WITH OUTLIERS` — the latest finish of any day, plus the buffer. The report
+  prints this line only when outlier days exist. This time would have worked on
+  every day observed.
+- `EARLIER` — the typical day's finish, plus the buffer. It is the median of the
+  normal days, so the outlier days and the occasional slow load do not move it.
+  It leaves out the days that missed a dependency, because no schedule time
+  fixes a table that skipped a day. `advice.earlier_time` carries it, and it
+  always equals `advice.usual_time`.
+
+When there are no outlier days the report keeps the two-line shape:
+`SCHEDULE AT` and `EARLIER` only. `advice.safe_without_outliers` carries the
+`SCHEDULE AT` time, and `advice.usual_time` carries the typical day's finish.
+
+### Tables that refresh more than once a day
+
+The advisor counts the runs on a typical day. A table that refreshes two or
+more times on a typical day is flagged `multi_daily`. The report gives the
+usual time of each run, and the safe time of each run:
+
+```
+!  catalog.schema.orders refreshes 3 times a day (usually 02:00, 09:00, 17:00; safe at 02:15, 09:15, 17:15) — the schedule above uses its first run.
+```
+
+A table with a one-off rerun on one or two days is still an ordinary daily
+table. Only a typical day counts. The gate reports the same flag on each
+dependency.
+
+### Compute mode: no warehouse needed
+
+`advise` picks its history engine in this order:
+
+1. an explicit `Workspace(warehouse_id="...")`
+2. the `WAREHOUSE_ID` environment variable
+3. the `SparkSession` the code already runs inside
+
+Inside a Databricks notebook or job, option 3 applies. No warehouse id and no
+access token are needed there. On a laptop only options 1 and 2 exist.
 
 ### Gate: is my view ready to refresh?
 
@@ -163,11 +217,53 @@ are the whole table:
 | Function dependency (a UDF) | a note, not a blocker |
 
 `Workspace(warehouse_id=...)` and `Config.fresh_hours` are optional. Without a
-`Workspace`, the engine is picked in order: an explicit warehouse, then
-`WAREHOUSE_ID` from the environment, then the Spark session the code already
-runs inside — so `can_refresh("c.s.view")` in a notebook or job needs no setup
-at all. On a laptop only the warehouse options exist, so
-one-liner above is enough inside a job.
+`Workspace`, the gate picks its engine in the same order as `advise` — see
+[Compute mode](#compute-mode-no-warehouse-needed). Inside a Databricks notebook
+or job the Spark session applies, so `can_refresh("catalog.schema.view")` needs
+no setup at all.
+
+#### Options that relax the daily check
+
+`can_refresh` takes three keyword options. Each one changes the 24-hour rule.
+
+```python
+from view_scheduler import can_refresh
+
+result = can_refresh(
+    "catalog.schema.my_view",
+    ignore_tables=["catalog.schema.audit_log"],   # pass, whatever its history shows
+    ignore_non_daily=True,                        # check a weekly table against its own schedule
+    check_multi_daily=True,                       # shorten the window for a busy table
+)
+```
+
+- `ignore_tables=["catalog.schema.table", ...]` — the gate passes those tables
+  whatever their history shows. The report says `ignored by caller`.
+- `ignore_non_daily=True` — the gate checks a table that does not refresh every
+  day against its own schedule, not the daily window. A weekly table gets up to
+  7 days (`168h`), and the report says `schedule: Mons`. A table with no refresh
+  in its history passes as a note. A daily table is still checked against the
+  normal window.
+- `check_multi_daily=True` — the gate checks a table that runs many times a day
+  against a shorter window. The window becomes `fresh_hours // runs per day`.
+  Three runs a day with `fresh_hours=24` gives an 8-hour window.
+
+#### Mark a table in Unity Catalog
+
+A table can mark itself. Set the Unity Catalog table property
+`view_scheduler.mode`:
+
+```sql
+ALTER TABLE catalog.schema.table SET TBLPROPERTIES ('view_scheduler.mode' = 'event_driven');
+```
+
+Use one of these values: `event_driven`, `event-driven`, `on_demand`,
+`on-demand`, `static`, `weekly`, or `ignore`.
+
+- `event_driven`, `on_demand`, `static`, and `ignore` — the gate does not block
+  on this table. The report says `<mode> table — ignored`.
+- `weekly` — the gate checks the table against a 7-day window, even when
+  `ignore_non_daily` is False.
 
 **Permissions.** The caller needs `SELECT` on each dependency (for
 `DESCRIBE HISTORY`) and `USE` on the catalogs and schemas involved. Materialized
@@ -208,6 +304,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-176 tests, all offline — no Spark session, no network, no credentials.
+221 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.

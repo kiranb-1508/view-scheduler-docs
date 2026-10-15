@@ -39,7 +39,7 @@ class DependencyRow:
 @dataclass(frozen=True)
 class Recommendation:
     safe: time | None           # worst all-clear + buffer
-    earlier: time | None        # second-worst all-clear + buffer
+    earlier: time | None        # usual time: median of the normal days + buffer
     n_days: int                 # days where every dependency refreshed
     span_days: int = 0          # observed span the `missed` counts are over
     rows: list[DependencyRow] = field(default_factory=list)
@@ -209,12 +209,9 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     usual, usual_next = _add_buffer(
         datetime.combine(ordered_normal[-1].date(), usual_clock), buffer_min)
 
-    if len(outliers) >= 2:
-        earlier, earlier_next = safe_no_out, safe_no_out_next
-    elif len(ordered) >= 2:
-        earlier, earlier_next = _add_buffer(ordered[-2], buffer_min)
-    else:
-        earlier, earlier_next = safe, safe_next
+    # `earlier` is the typical day's finish plus the buffer, in every case.
+    # The outliers are reruns, not the usual pace, so they never move it.
+    earlier, earlier_next = usual, usual_next
     return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
                           safe_next, earlier_next, safe_no_out, safe_no_out_next,
                           usual, usual_next, outliers)

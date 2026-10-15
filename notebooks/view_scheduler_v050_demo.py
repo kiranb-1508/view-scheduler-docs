@@ -6,7 +6,7 @@
 # MAGIC
 # MAGIC 1. **Spark compute fallback (`v0.5.1` + `v0.6.0`):** `can_refresh("c.s.v")` and `advise("c.s.v")` run directly on the active `SparkSession` when no `WAREHOUSE_ID` is passed.
 # MAGIC 2. **Dynamic SQL history window (`since_epoch`):** `DESCRIBE HISTORY` and `event_log()` queries filter by the configured `days_history` window in SQL.
-# MAGIC 3. **Three-tier schedule timings (`safe`, `safe_without_outliers`, `usual`):** Outliers appear in `SCHEDULE AT` (worst case), while `WITHOUT OUTLIERS` and `EARLIER` give the schedule without outlier reruns.
+# MAGIC 3. **Three-tier schedule timings (`safe`, `safe_without_outliers`, `usual`):** `SCHEDULE AT` is the outlier-free time (`safe_without_outliers`). `WITH OUTLIERS` is the worst case (`safe`), with the outlier reruns included. `EARLIER` is the typical day (`usual`).
 # MAGIC 4. **Multi-daily table detection (`multi_daily`, `daily_slots`, `safe_slots`):** Tables that refresh 2+ times on a typical active day are flagged, while 1-off reruns stay normal daily tables.
 # MAGIC 5. **Gate cadence and ignore modes (`ignore_non_daily`, `ignore_tables`, `check_multi_daily`, `view_scheduler.mode`):** Weekly, static, event-driven, and multi-daily tables are handled cleanly in `can_refresh()`.
 
@@ -49,7 +49,7 @@ summary = {"spark_fallback_active": ws.spark is not None}
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Outlier-Aware Timings (`SCHEDULE AT`, `WITHOUT OUTLIERS`, `EARLIER`)
+# MAGIC ## 1. Outlier-Aware Timings (`SCHEDULE AT`, `WITH OUTLIERS`, `EARLIER`)
 # MAGIC
 # MAGIC First, run `advise` on `t_daily_late_tail` in the live `workspace.sched_rig` schema, and on a 15-day history with 2 outlier rerun days (`06:10`) and 2 heavy-load days (`04:20`).
 
@@ -204,7 +204,7 @@ summary["gate_multi_daily"] = gate_multi.to_dict()
 
 # COMMAND ----------
 
-print("===== v0.5.0 DEMO SUMMARY =====")
+print("===== v0.6.0 DEMO SUMMARY =====")
 print(json.dumps({
     "live_late_tail_safe": summary["live_late_tail"]["safe_time"],
     "live_late_tail_without_outliers": summary["live_late_tail"]["safe_without_outliers"],

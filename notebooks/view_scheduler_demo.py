@@ -34,7 +34,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.3.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
 
 # COMMAND ----------
 
@@ -87,13 +87,14 @@ print(text)
 # MAGIC | `MISSED` | Days it was expected to run and didn't |
 # MAGIC
 # MAGIC `SCHEDULE AT` is the latest finish in the period plus a small gap. It would
-# MAGIC have worked on every day observed. `EARLIER` is the second latest: a bit
-# MAGIC sooner, but one job had not finished yet on one day. **Starting early means
-# MAGIC publishing stale data**, so prefer the safe time unless you have a reason.
+# MAGIC have worked on every day observed. `EARLIER` is the typical day: the median
+# MAGIC of the normal days, plus the same gap. A slower day still finishes after it,
+# MAGIC so **starting early can mean publishing stale data**. Prefer the safe time
+# MAGIC unless you have a reason.
 # MAGIC
-# MAGIC The `WHEN THE LAST JOB FINISHED` block is the evidence behind those two times —
-# MAGIC it names the day that set each one, so a surprising answer can be traced to
-# MAGIC the day that caused it rather than taken on faith.
+# MAGIC The `WHEN THE LAST JOB FINISHED` block is the evidence behind the
+# MAGIC `SCHEDULE AT` time. It names the day that set it, so a surprising answer can
+# MAGIC be traced to the day that caused it rather than taken on faith.
 
 # COMMAND ----------
 
@@ -355,7 +356,7 @@ print(text)
 # MAGIC The same thing without a notebook:
 # MAGIC
 # MAGIC ```bash
-# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.3.0-py3-none-any.whl
+# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
 # MAGIC export WAREHOUSE_ID=f96bd3430e175166
 # MAGIC view-scheduler workspace.sched_rig.v_realistic
 # MAGIC view-scheduler workspace.sched_rig.v_healthy --days 60 --buffer 30 --quiet

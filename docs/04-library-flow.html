@@ -244,7 +244,7 @@ li { margin-bottom: 6px; }
         <rect class="good" x="270" y="1538" width="580" height="104" rx="5" />
         <text class="title" x="560" y="1573" text-anchor="middle">schedule results</text>
         <text class="body" x="560" y="1598" text-anchor="middle">safe = worst all-clear + buffer</text>
-        <text class="body" x="560" y="1620" text-anchor="middle">sooner = second-worst + buffer; per-weekday times</text>
+        <text class="body" x="560" y="1620" text-anchor="middle">sooner = the typical day (the median) + buffer; per-weekday times</text>
 
         <path class="line" d="M560 1642 L560 1682" />
         <rect class="good" x="270" y="1682" width="580" height="40" rx="5" />
@@ -298,7 +298,7 @@ li { margin-bottom: 6px; }
       <p>A table normally finishes at 07:00 but finishes at 08:00 once:</p>
       <ul>
         <li><strong>safe:</strong> 08:15, because it covers the observed worst day;</li>
-        <li><strong>sooner:</strong> approximately 07:15, because it excludes the single worst day;</li>
+        <li><strong>sooner:</strong> approximately 07:15, because it is the typical day, not the observed worst day;</li>
         <li><strong>evidence:</strong> the report names the date, table, usual time, worst time, and the one-day risk.</li>
       </ul>
       <p>The library does not silently delete the 08:00 incident. It lets the operator decide whether that incident should permanently influence the schedule.</p>

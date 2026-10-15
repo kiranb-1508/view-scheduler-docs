@@ -7,13 +7,14 @@
 # MAGIC It reads the history of every upstream job and suggests a time.
 # MAGIC
 # MAGIC - `SCHEDULE AT` — the time that would have worked on every day.
-# MAGIC - `EARLIER` — sooner, but a job had not finished yet on some day.
+# MAGIC - `EARLIER` — the typical day. It is the middle normal day plus the
+# MAGIC   buffer. Outlier reruns do not move it.
 # MAGIC
 # MAGIC This is a suggestion from history. For a live check, use `can_refresh`.
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.3.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
 
 # COMMAND ----------
 

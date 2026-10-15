@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
@@ -281,8 +281,18 @@ def _history_summary(workspace: Workspace, name: str, moment: datetime,
     commit cannot make a stale table look fresh. The cadence label comes from
     the weekdays the table wrote on in the window. `multi_daily` is True when
     the median active day held two or more qualifying commits.
+
+    The read is bounded in SQL to the start of the local day `days_history`
+    days before `moment`, exactly as `run.collect_history` computes it. The
+    cadence is computed over that many days, so the gate never needs older
+    commits, and the warehouse returns a small window instead of the whole
+    history of a long-lived table.
     """
-    commits = read_commits(workspace, name, with_metrics=False)
+    cutoff_day = moment.date() - timedelta(days=settings.days_history)
+    since_epoch = int(datetime.combine(cutoff_day, time.min,
+                                       tzinfo=settings.tz).timestamp())
+    commits = read_commits(workspace, name, with_metrics=False,
+                           since_epoch=since_epoch)
     latest: datetime | None = None
     for commit in commits:
         if not qualifying(commit):
