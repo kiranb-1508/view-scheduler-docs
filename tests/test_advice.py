@@ -136,7 +136,8 @@ def test_advice_exposes_the_outlier_aware_times():
     assert advice.safe_without_outliers == time(4, 15)
     assert advice.usual_time == time(4, 15)
     assert set(advice.outlier_days) == {date(2026, 8, 5), date(2026, 8, 9)}
-    assert "WITHOUT OUTLIERS" in advice.render()
+    assert "WITH OUTLIERS  06:25" in advice.render()
+    assert "SCHEDULE AT  04:15    safe on 10 of 12 days" in advice.render()
 
 
 def test_advice_to_dict_carries_the_outlier_fields():
@@ -150,6 +151,18 @@ def test_advice_to_dict_carries_the_outlier_fields():
     assert payload["usual_time"] == "04:15"
     assert payload["outlier_days"] == ["2026-08-05", "2026-08-09"]
     json.dumps(payload)   # must not raise
+
+
+def test_advice_to_dict_keeps_its_keys():
+    """Callers log this dict. A key must not disappear."""
+    payload = advise("c.s.v", workspace(BUSY), CONFIG, today=TODAY,
+                     quiet=True).to_dict()
+    assert set(payload) == {
+        "view", "safe_time", "earlier_time", "next_day",
+        "safe_without_outliers", "usual_time", "outlier_days", "days_used",
+        "period_days", "timezone", "dependencies", "unreadable",
+        "finished_by_day", "warnings",
+    }
 
 
 def test_advice_reports_multi_daily_slots():

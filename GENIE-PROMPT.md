@@ -134,13 +134,13 @@ tests alone.
 Phase 3 — roll-up and recommendation. recommend(tables, buffer_min) ->
 (safe, earlier, n_days). Intersect days so only cycles where EVERY dependency
 refreshed are counted. all_clear per day = max across tables. safe = worst +
-buffer, earlier = second-worst + buffer.
+buffer, earlier = the typical day + buffer (the median of the normal days).
 
 GATE: unit tests with hand-built timestamps, including exactly this case:
   orders:     Mon 04:00  Tue 04:10  Wed 04:05  Thu 05:30  Fri 04:00
   customers:  Mon 03:50  Tue 03:45  Wed 06:10  Thu 03:50  Fri 03:55
   => all_clear: 04:00, 04:10, 06:10, 05:30, 04:00
-  => safe = 06:25, earlier = 05:45  (buffer 15)
+  => safe = 06:25, earlier = 04:25  (buffer 15)
 Then run end to end on @<your real view>. Then stop.
 ```
 

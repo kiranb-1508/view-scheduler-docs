@@ -203,7 +203,7 @@ from view_scheduler import advise
 
 advice = advise("sales.gold.customer_360")   # WAREHOUSE_ID from the env
 advice.safe_time      # datetime.time(6, 25)  or None
-advice.earlier_time   # datetime.time(5, 45)  or None
+advice.earlier_time   # datetime.time(4, 25)  or None
 advice.next_day       # True when the (+1 day) marker applies
 advice.dependencies   # one row per upstream job
 advice.to_dict()      # JSON

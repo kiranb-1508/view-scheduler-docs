@@ -5,7 +5,7 @@ The clock is pinned with `now=` so the rolling window is deterministic.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
@@ -17,6 +17,23 @@ from view_scheduler.gate import Dependency, GateResult, ViewResult, can_refresh
 UTC = timezone.utc
 NOW = f.at("2026-08-06", "12:00")          # noon UTC
 CONFIG = Config(timezone="UTC")
+
+
+class RecordingWorkspace(FakeWorkspace):
+    """A FakeWorkspace that also keeps every SQL statement it was given.
+
+    `FakeWorkspace.sql_calls` stores only the target, so it cannot show the
+    statement text. This subclass records the statement too, which the SQL
+    window test needs. Same pattern as tests/test_client.py.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.statements: list[str] = []
+
+    def sql(self, statement, target):
+        self.statements.append(statement)
+        return super().sql(statement, target)
 
 
 def ago(hours):
@@ -292,6 +309,35 @@ def test_naive_now_is_localised_to_the_config_timezone():
     result = can_refresh("c.s.v", ws, CONFIG,
                          now=datetime(2026, 8, 6, 12, 0), quiet=True)
     assert result.ready is True
+
+
+# --- the bounded history read ------------------------------------------------
+
+def test_history_read_is_bounded_to_the_cadence_window():
+    """The gate reads only the window it needs, like the advisor does.
+
+    `days_history` days of history decide the cadence, so the SQL must carry a
+    cutoff at the start of the local day `days_history` days before `now`.
+    """
+    ws = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                            history={"c.s.t": [write(8)]})
+    run("c.s.v", ws)
+
+    cutoff_day = NOW.date() - timedelta(days=CONFIG.days_history)
+    expected = int(datetime.combine(cutoff_day, time.min,
+                                    tzinfo=CONFIG.tz).timestamp())
+    assert f"WHERE unix_timestamp(timestamp) >= {expected}" in ws.statements[-1]
+
+
+def test_bounded_history_read_keeps_the_verdict():
+    """The SQL cutoff must not change the verdict for the same fixture data."""
+    fresh = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                               history={"c.s.t": [write(8)]})
+    assert run("c.s.v", fresh).ready is True
+
+    stale = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                               history={"c.s.t": [write(56)]})
+    assert run("c.s.v", stale).ready is False
 
 
 # --- lists, caching, printing ------------------------------------------------
