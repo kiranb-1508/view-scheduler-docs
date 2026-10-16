@@ -19,9 +19,11 @@ table, its history is readable, and one on a schedule is stale between runs. A
 materialized view is read from its pipeline event log. Anything we cannot read
 blocks the view, because the gate fails closed.
 
-The cadence window applies only when the history is trusted: ten or more run
-days, and no weekday seen just once. A thin history keeps the daily window.
-That is the fail-closed guard.
+The cadence window applies only when the history is trusted: every weekday the
+table wrote on appears at least twice, and the table does not run on all seven
+weekdays. A table seen on all seven weekdays is a daily table with outages, so
+it keeps the daily window. A thin history keeps the daily window too. That is
+the fail-closed guard.
 
 The call can relax the daily check. `ignore_tables` names tables to skip.
 `ignore_non_daily` passes a table with no write in history as a note.
@@ -66,14 +68,14 @@ class ReadSummary:
 
     `cadence` is the observed schedule in words: "daily", "never", or a
     weekday list such as "Mons" or "Mon,Tue,Wed,Thu,Fri". `seen_weekdays` and
-    `observed_days` feed the trust guard. `every_weekday_twice` is True when
-    every weekday the table wrote on appears at least twice.
+    `every_weekday_twice` feed the trust guard: every weekday the table wrote
+    on must appear at least twice, and the table must not run on all seven
+    weekdays. `every_weekday_twice` is that twice test.
     """
 
     latest: datetime | None
     cadence: str
     seen_weekdays: frozenset[int]
-    observed_days: int
     every_weekday_twice: bool
     multi_daily: bool
     median_runs: int
@@ -345,7 +347,6 @@ def _history_summary(workspace: Workspace, name: str, moment: datetime,
         latest=latest,
         cadence=cadence,
         seen_weekdays=frozenset(counts),
-        observed_days=len(days),
         every_weekday_twice=bool(counts) and all(n >= 2 for n in counts.values()),
         multi_daily=median_runs >= 2,
         median_runs=median_runs,
@@ -360,8 +361,8 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
     The window depends on the table's own observed schedule. A daily table
     keeps `window` hours. A table on a trusted weekly-ish schedule gets
     `(max_gap_days + 1) * window`, so a Mon-Fri table gets 96 hours and a
-    Mondays-only table gets 192. The trust guard fails closed: fewer than ten
-    run days, or a weekday seen only once, keeps the strict daily window.
+    Mondays-only table gets 192. The trust guard fails closed: a weekday seen
+    only once, or all seven weekdays seen, keeps the strict daily window.
 
     A `view_scheduler.mode` of "weekly" forces the seven-day gap, whatever the
     observed cadence. A table that runs many times a day divides the window by
@@ -410,6 +411,10 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
     # The window this table earns from its own schedule. "weekly" mode forces
     # the seven-day gap. A trusted weekly-ish cadence widens the window by the
     # longest cyclic gap between run weekdays. Anything else stays daily.
+    #
+    # A table seen on all seven weekdays is a daily table with outages, so it
+    # keeps the daily window whatever its coverage. The trust guard fails
+    # closed: every weekday the table wrote on must appear at least twice.
     weekly_mode = mode == "weekly"
     if weekly_mode:
         on_schedule = True
@@ -417,8 +422,7 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
     elif cadence == "daily":
         on_schedule = False
         earned = window
-    elif cadence != "never" and history.observed_days >= 10 \
-            and history.every_weekday_twice:
+    elif len(history.seen_weekdays) < 7 and history.every_weekday_twice:
         on_schedule = True
         earned = (max_gap_days(history.seen_weekdays) + 1) * window
     else:

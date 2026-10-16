@@ -215,6 +215,7 @@ are the whole table:
 | No qualifying write in its history | **blocks** |
 | Cannot be read (missing, no permission) | **blocks** — the gate fails closed |
 | A weekly-ish table on a trusted schedule | checked against its own wider window — see below |
+| A table seen on all seven weekdays | a daily table with outages — keeps the daily window |
 | A table with a thin or new history | checked on the daily window, whatever it looks like |
 | Streaming table | checked from its history, like any table — one on a schedule is stale between runs |
 | Materialized view | read from its pipeline event log |
@@ -235,9 +236,11 @@ longest gap between those run weekdays, plus one, times `fresh_hours`:
 | Monday to Friday | 96h |
 | Mondays only | 192h |
 
-The gate uses this wider window only for a trusted table. A trusted table has
-at least ten run days in the read window. Every weekday it wrote on appears at
-least twice. A thin or new table keeps the daily window. The gate fails closed.
+The gate uses this wider window only for a trusted table. A trusted table does
+not run on all seven weekdays, and every weekday it wrote on appears at least
+twice. A table seen on all seven weekdays is a daily table with outages, so it
+keeps the daily window. A thin or new table keeps the daily window too. The
+gate fails closed.
 
 A missed run is still caught within one day. A Mon-Fri table that skips Friday
 is 98 hours old on Monday. That is past its 96-hour window, so the gate blocks.

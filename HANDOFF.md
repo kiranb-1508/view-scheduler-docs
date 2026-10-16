@@ -391,10 +391,12 @@ These were verified against a live workspace. They are not opinions.
     forever. The gate now checks each table against its own observed schedule.
     The window is one plus the longest gap between run weekdays, times
     `fresh_hours`: a Mon-Fri table gets 96 hours and a Mondays-only table gets
-    192. The gate extends the window only for a trusted table — at least ten
-    run days, and no weekday seen just once. A thin history keeps the daily
-    window, so a new table cannot relax its own check. A missed run is still
-    caught within one day. Revised 2026-10-16.
+    192. The gate extends the window only for a trusted table — no weekday
+    seen just once, and the table does not run on all seven weekdays. A table
+    seen on all seven weekdays is a daily table with outages, so it keeps the
+    daily window. A thin history keeps the daily window too, so a new table
+    cannot relax its own check. A missed run is still caught within one day.
+    Revised 2026-10-16.
 
 11. **Classify a commit exactly like this, in this order:**
 
