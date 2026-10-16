@@ -69,6 +69,8 @@ def test_unreadable_dependency_gets_its_own_no_time_wording():
     assert "The times below cover only the 2 dependencies that were read." in text
     assert "there is no day where every job had finished" not in text
     assert "WHEN THE LAST JOB FINISHED" in text   # readable evidence still prints
+    assert "2026-08-01" in text                   # ... the rows, not just a header
+    assert "sets the" not in text                 # no mark for an unprinted time
 
 
 def test_the_no_common_day_wording_is_not_the_unreadable_wording():

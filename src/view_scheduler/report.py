@@ -116,21 +116,27 @@ def all_clear_series(result: Recommendation) -> list[str]:
     beside it. SCHEDULE AT comes from the latest normal day. WITH OUTLIERS
     comes from the latest day of all, and prints only when outliers exist.
     `earlier` is a median over the window, so no single day sets it.
+
+    A mark names a time the report prints. When the headline is suppressed
+    (`safe` is None) no time is printed, so no mark prints either: it would
+    name a time the report does not contain. The rows stay — they are the
+    readable evidence.
     """
     if not result.all_clear:
         return []
     ordered = sorted(result.all_clear.items(), key=lambda kv: kv[1].time(),
                      reverse=True)
     outliers = set(result.outlier_days)
-    # SCHEDULE AT is the latest normal day (the latest day of all when there
-    # are no outliers). WITH OUTLIERS is the latest day of all.
-    schedule_day = next((day for day, _ in ordered if day not in outliers),
-                        ordered[0][0])
-    worst_day = ordered[0][0]
     marks: dict = {}
-    marks.setdefault(schedule_day, []).append("SCHEDULE AT")
-    if outliers:
-        marks.setdefault(worst_day, []).append("WITH OUTLIERS")
+    if result.safe:
+        # SCHEDULE AT is the latest normal day (the latest day of all when
+        # there are no outliers). WITH OUTLIERS is the latest day of all.
+        schedule_day = next((day for day, _ in ordered if day not in outliers),
+                            ordered[0][0])
+        worst_day = ordered[0][0]
+        marks.setdefault(schedule_day, []).append("SCHEDULE AT")
+        if outliers:
+            marks.setdefault(worst_day, []).append("WITH OUTLIERS")
     out = ["WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)"]
     for day, moment in ordered:
         mark = "".join(f"   ← sets the {label} time"

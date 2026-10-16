@@ -115,6 +115,11 @@ def test_an_unreadable_dependency_removes_the_headline():
     assert advice.usual_time is None
     assert "could not be read" in advice.text
     assert advice.to_dict()["safe_time"] is None
+    # The readable evidence still prints, but with no marks: no printed time
+    # means no day may be said to set one.
+    assert "2026-08-04" in advice.text
+    assert "WHEN THE LAST JOB FINISHED" in advice.text
+    assert "sets the" not in advice.text
 
 
 def test_a_function_dependency_keeps_the_headline():
