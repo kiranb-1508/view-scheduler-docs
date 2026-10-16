@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code walkthrough — view_scheduler, every class and function</title>
+<style>
+:root{
+  --paper:#F4F6F8; --surface:#FFFFFF; --surface-sunk:#E9EDF1;
+  --ink:#12202E; --ink-soft:#3D4E5C; --ink-mute:#697A88;
+  --rule:#CFD8DF; --rule-soft:#E1E7EC;
+  --accent:#1E6F8C; --accent-soft:#DCEAF0;
+  --warn:#A87A16; --warn-soft:#F5EBD6;
+  --crit:#B3324A; --crit-soft:#F7DFE4;
+  --good:#2F6B4F; --good-soft:#DEEDE4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+    --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+    --rule:#2A3841; --rule-soft:#1E2A32;
+    --accent:#59AEC9; --accent-soft:#12303C;
+    --warn:#D6A94A; --warn-soft:#33280F;
+    --crit:#E2788B; --crit-soft:#3A1A22;
+    --good:#6FBE95; --good-soft:#12301F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+  --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+  --rule:#2A3841; --rule-soft:#1E2A32;
+  --accent:#59AEC9; --accent-soft:#12303C;
+  --warn:#D6A94A; --warn-soft:#33280F;
+  --crit:#E2788B; --crit-soft:#3A1A22;
+  --good:#6FBE95; --good-soft:#12301F;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:Georgia,"Times New Roman",serif;font-size:17px;line-height:1.6}
+.wrap{max-width:1140px;margin:0 auto;padding:0 26px 90px}
+header.mast{border-bottom:2px solid var(--ink);padding:54px 0 24px}
+.eyebrow{font-family:"Courier New",monospace;font-size:11px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-family:Arial,Helvetica,sans-serif;font-weight:700;
+  font-size:clamp(2rem,5.2vw,3rem);line-height:1.05;letter-spacing:-.025em;margin:0 0 14px}
+h2{font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:1.5rem;
+  letter-spacing:-.015em;margin:56px 0 10px}
+h3{font-family:Arial,Helvetica,sans-serif;font-weight:600;font-size:1.04rem;margin:26px 0 7px}
+p{margin:0 0 14px}
+.lead{max-width:74ch;color:var(--ink-soft);font-size:1.12rem;margin:0}
+code,pre{font-family:"Courier New",monospace}
+code{background:var(--surface-sunk);padding:1px 5px;border-radius:2px;font-size:.86em}
+pre{background:var(--surface-sunk);border:1px solid var(--rule);padding:14px 16px;
+  margin:14px 0 18px;font-size:12.6px;line-height:1.5;overflow-x:auto}
+pre code{background:transparent;padding:0;font-size:inherit}
+nav.toc{position:sticky;top:0;z-index:20;background:var(--paper);
+  border-bottom:1px solid var(--rule);padding:10px 0;display:flex;gap:8px;flex-wrap:wrap}
+nav.toc button{font-family:"Courier New",monospace;font-size:11.5px;
+  background:var(--surface);border:1px solid var(--rule);color:var(--ink-soft);
+  padding:6px 11px;cursor:pointer;border-radius:2px}
+nav.toc button:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc .spacer{flex:1}
+nav.toc #theme{color:var(--accent);border-color:var(--accent)}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:15px 19px;margin:20px 0}
+.note p:last-child{margin-bottom:0}
+.note .tag{font-family:"Courier New",monospace;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;display:block;margin-bottom:6px;color:var(--accent)}
+.note.good{border-left-color:var(--good);background:var(--good-soft)}
+.note.good .tag{color:var(--good)}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+.stat{border:1px solid var(--rule);background:var(--surface);padding:10px 16px;
+  font-family:"Courier New",monospace;font-size:12px;color:var(--ink-soft)}
+.stat b{color:var(--accent);font-size:15px}
+/* module map */
+.map-shell{border:1px solid var(--rule);background:var(--surface);padding:12px;margin:20px 0 0;overflow-x:auto}
+.map-shell svg{display:block;min-width:960px;width:100%;height:auto}
+.map-shell .mod{cursor:pointer}
+.map-shell .mod rect{stroke:var(--rule);stroke-width:1.4;fill:var(--paper);transition:fill .15s}
+.map-shell .mod:hover rect{fill:var(--accent-soft);stroke:var(--accent)}
+.map-shell .mod.on rect{fill:var(--accent);stroke:var(--accent)}
+.map-shell .mod.on text{fill:#fff}
+.map-shell .mod text{font-family:"Courier New",monospace;font-size:13px;fill:var(--ink)}
+.map-shell .mod text.sub{font-size:10px;fill:var(--ink-mute)}
+.map-shell .mod.on text.sub{fill:#DCEAF0}
+.mod-panel{border:1px solid var(--rule);border-top:0;background:var(--surface);
+  padding:16px 20px;margin:0 0 20px;min-height:120px}
+.mod-panel h3{margin-top:0}
+.mod-panel .mono{font-family:"Courier New",monospace;font-size:12.3px;color:var(--ink-soft)}
+.mod-panel ul{margin:8px 0 12px;padding-left:20px}
+.mod-panel li{margin-bottom:3px;font-family:"Courier New",monospace;font-size:12.6px;color:var(--ink-soft)}
+/* traces */
+.trace{position:relative;margin:20px 0;padding-left:0}
+.tstep{border:1px solid var(--rule);background:var(--surface);margin:0 0 8px;position:relative}
+.tstep summary{cursor:pointer;padding:12px 16px;display:flex;align-items:baseline;gap:12px;
+  list-style:none;font-family:Arial,sans-serif;font-size:14.5px;font-weight:600}
+.tstep summary::-webkit-details-marker{display:none}
+.tstep summary::before{content:"▸";color:var(--accent);font-family:"Courier New",monospace}
+.tstep[open] summary::before{content:"▾"}
+.tstep .num{font-family:"Courier New",monospace;font-size:11px;color:var(--ink-mute);min-width:26px}
+.tstep .fn{font-family:"Courier New",monospace;font-size:12px;font-weight:400;color:var(--accent);
+  margin-left:auto;white-space:nowrap}
+.tstep .body{padding:4px 20px 16px;border-top:1px solid var(--rule-soft)}
+.tstep .body p:first-child{margin-top:12px}
+.arrow{text-align:center;color:var(--ink-mute);font-size:15px;margin:-4px 0 4px}
+.linky{font-family:"Courier New",monospace;font-size:10.5px;background:var(--accent-soft);
+  color:var(--accent);border:1px solid var(--accent);padding:2px 8px;cursor:pointer;border-radius:2px;
+  margin:4px 6px 0 0;display:inline-block}
+.linky:hover{background:var(--accent);color:#fff}
+/* class cards */
+.grid{display:grid;gap:14px}
+.grid.c2{grid-template-columns:repeat(2,1fr)}
+.grid.c3{grid-template-columns:repeat(3,1fr)}
+.card{border:1px solid var(--rule);background:var(--surface);padding:15px 17px}
+.card h3{margin:0 0 6px;font-family:"Courier New",monospace;font-size:14.5px}
+.card p{font-size:14.5px;color:var(--ink-soft);margin:0 0 8px}
+.card p:last-child{margin-bottom:0}
+.card.pub{border-top:3px solid var(--accent)}
+.card.dat{border-top:3px solid var(--good)}
+.card .where{font-family:"Courier New",monospace;font-size:11px;color:var(--ink-mute)}
+.card table{font-size:12.6px;margin-top:8px}
+.card table td{border-bottom:1px solid var(--rule-soft);padding:4px 8px}
+.card table td:first-child{font-family:"Courier New",monospace;white-space:nowrap;color:var(--accent)}
+/* function index */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
+.controls input[type=search]{font-family:"Courier New",monospace;font-size:13px;padding:8px 12px;
+  border:1px solid var(--rule);background:var(--surface);color:var(--ink);width:300px}
+.controls button{font-family:"Courier New",monospace;font-size:11px;background:var(--surface);
+  border:1px solid var(--rule);padding:7px 11px;cursor:pointer;color:var(--ink-soft)}
+.controls button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+table{ border-collapse:collapse;width:100%;background:var(--surface);font-size:13.5px}
+th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--rule-soft);padding:9px 12px}
+thead th{font-family:Arial,sans-serif;font-weight:600;font-size:11px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-mute);background:var(--surface-sunk);
+  border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto;border:1px solid var(--rule);margin:12px 0 22px;max-height:640px;overflow-y:auto}
+.fname{font-family:"Courier New",monospace;font-size:12.6px;white-space:nowrap}
+.fname .cl{color:var(--good)}
+.fmod{font-family:"Courier New",monospace;font-size:11px;color:var(--ink-mute);white-space:nowrap}
+.fdesc{color:var(--ink-soft);font-size:13px}
+.tagm{font-family:"Courier New",monospace;font-size:10px;letter-spacing:.05em;padding:1px 6px;
+  border-radius:999px;margin-right:3px;white-space:nowrap}
+.tagm.io{background:var(--accent-soft);color:var(--accent)}
+.tagm.pure{background:var(--good-soft);color:var(--good)}
+.tagm.entry{background:var(--warn-soft);color:var(--warn)}
+.tagm.priv{background:var(--surface-sunk);color:var(--ink-mute)}
+.tagm.pub{background:var(--accent-soft);color:var(--accent)}
+.calls{font-family:"Courier New",monospace;font-size:11px;color:var(--ink-soft);line-height:1.7}
+/* classifier */
+.clf{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:16px 0}
+@media (max-width:800px){.clf{grid-template-columns:1fr}}
+.clf .card select{width:100%;padding:7px 9px;border:1px solid var(--rule);
+  background:var(--paper);color:var(--ink);font-family:"Courier New",monospace;font-size:12.5px;margin-top:4px}
+.clf label{font-family:"Courier New",monospace;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.chip{font-family:"Courier New",monospace;font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+  padding:3px 10px;border-radius:999px;font-weight:700}
+.chip.full_replace{background:var(--accent-soft);color:var(--accent)}
+.chip.incremental{background:var(--good-soft);color:var(--good)}
+.chip.ignore{background:var(--warn-soft);color:var(--warn)}
+.chip.unknown{background:var(--crit-soft);color:var(--crit)}
+/* reading order */
+ol.read{margin:14px 0;padding-left:24px}
+ol.read li{margin-bottom:8px}
+ol.read code{white-space:nowrap}
+footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
+  font-family:"Courier New",monospace;font-size:11.5px;color:var(--ink-mute);letter-spacing:.04em}
+@media (max-width:720px){.grid.c2,.grid.c3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Code walkthrough · v0.4.0 · every class and function of view_scheduler</p>
+  <h1>Inside the code</h1>
+  <p class="lead">This page maps the package file by file, class by class, function by function.
+  Click the module map, follow the two call traces, search the full function index, and try the
+  commit classifier. Line numbers match the source at v0.4.0.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <button data-go="s-map">Module map</button>
+  <button data-go="s-trace-gate">Trace: can_refresh</button>
+  <button data-go="s-trace-advise">Trace: advise</button>
+  <button data-go="s-classes">Class tour</button>
+  <button data-go="s-index">Function index</button>
+  <button data-go="s-classify">Classifier</button>
+  <button data-go="s-read">Reading order</button>
+  <span class="spacer"></span>
+  <button id="theme" type="button">Theme</button>
+</nav>
+
+<div class="stats">
+  <span class="stat"><b>12</b> modules</span>
+  <span class="stat"><b>13</b> classes</span>
+  <span class="stat"><b>66</b> functions &amp; methods</span>
+  <span class="stat"><b>221</b> offline tests</span>
+  <span class="stat">read-only by design</span>
+</div>
+
+<!-- ============================================================ -->
+<section id="s-map">
+  <h2>1 · The module map</h2>
+  <p>Click a module. The panel below shows its role, its imports, and everything inside it.
+  Blue lines are the two main call paths. Gray lines are data objects.</p>
+
+  <div class="map-shell">
+    <svg viewBox="0 0 1000 470" role="img" aria-label="Module dependency map">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+        </marker>
+        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-mute)"/>
+        </marker>
+      </defs>
+
+      <!-- arrows first, so boxes sit on top -->
+      <g fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ah)">
+        <path d="M 145 84 C 145 110, 375 110, 375 138"/>
+        <path d="M 375 84 L 375 138"/>
+        <path d="M 685 84 C 685 150, 135 170, 135 248"/>
+        <path d="M 355 194 C 300 215, 160 220, 138 248"/>
+        <path d="M 400 194 C 440 220, 480 225, 490 248"/>
+        <path d="M 420 194 C 500 225, 660 225, 672 248"/>
+        <path d="M 135 304 L 135 358"/>
+        <path d="M 168 360 C 230 360, 240 320, 300 306"/>
+        <path d="M 495 304 C 560 330, 620 340, 645 358"/>
+      </g>
+      <g fill="none" stroke="var(--ink-mute)" stroke-width="1.2" marker-end="url(#ah2)">
+        <path d="M 620 304 C 700 330, 730 340, 700 358"/>
+        <path d="M 330 304 C 480 330, 610 340, 645 360"/>
+      </g>
+
+      <!-- row 1: entry points -->
+      <g class="mod" data-mod="cli"><rect x="60" y="30" width="170" height="54"/><text x="145" y="53" text-anchor="middle">cli.py</text><text class="sub" x="145" y="70" text-anchor="middle">command line</text></g>
+      <g class="mod" data-mod="advice"><rect x="290" y="30" width="170" height="54"/><text x="375" y="53" text-anchor="middle">advice.py</text><text class="sub" x="375" y="70" text-anchor="middle">advise() — advisory</text></g>
+      <g class="mod" data-mod="gate"><rect x="600" y="30" width="170" height="54"/><text x="685" y="53" text-anchor="middle">gate.py</text><text class="sub" x="685" y="70" text-anchor="middle">can_refresh() — the gate</text></g>
+      <g class="mod" data-mod="init"><rect x="830" y="30" width="120" height="54"/><text x="890" y="53" text-anchor="middle">__init__.py</text><text class="sub" x="890" y="70" text-anchor="middle">public API</text></g>
+
+      <!-- row 2 -->
+      <g class="mod" data-mod="run"><rect x="290" y="140" width="170" height="54"/><text x="375" y="163" text-anchor="middle">run.py</text><text class="sub" x="375" y="180" text-anchor="middle">collect() · analyze()</text></g>
+
+      <!-- row 3 -->
+      <g class="mod" data-mod="walker"><rect x="60" y="250" width="150" height="54"/><text x="135" y="273" text-anchor="middle">walker.py</text><text class="sub" x="135" y="290" text-anchor="middle">dependency walk</text></g>
+      <g class="mod" data-mod="history"><rect x="240" y="250" width="150" height="54"/><text x="315" y="273" text-anchor="middle">history.py</text><text class="sub" x="315" y="290" text-anchor="middle">pure classifier</text></g>
+      <g class="mod" data-mod="recommend"><rect x="420" y="250" width="150" height="54"/><text x="495" y="273" text-anchor="middle">recommend.py</text><text class="sub" x="495" y="290" text-anchor="middle">pure arithmetic</text></g>
+      <g class="mod" data-mod="report"><rect x="600" y="250" width="150" height="54"/><text x="675" y="273" text-anchor="middle">report.py</text><text class="sub" x="675" y="290" text-anchor="middle">advice text</text></g>
+
+      <!-- row 4 -->
+      <g class="mod" data-mod="client"><rect x="60" y="360" width="150" height="54"/><text x="135" y="383" text-anchor="middle">client.py</text><text class="sub" x="135" y="400" text-anchor="middle">the only I/O</text></g>
+      <g class="mod" data-mod="obs"><rect x="240" y="360" width="120" height="54"/><text x="300" y="383" text-anchor="middle">obs.py</text><text class="sub" x="300" y="400" text-anchor="middle">call logging</text></g>
+      <g class="mod" data-mod="config"><rect x="400" y="360" width="120" height="54"/><text x="460" y="383" text-anchor="middle">config.py</text><text class="sub" x="460" y="400" text-anchor="middle">4 settings</text></g>
+      <g class="mod" data-mod="models"><rect x="570" y="360" width="130" height="54"/><text x="635" y="383" text-anchor="middle">models.py</text><text class="sub" x="635" y="400" text-anchor="middle">shared data shapes</text></g>
+    </svg>
+  </div>
+  <div class="mod-panel" id="modPanel">
+    <h3>Pick a module</h3>
+    <p>Click one of the boxes above. The map shows the import direction: an arrow points at the module that is imported.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-trace-gate">
+  <h2>2 · Trace: <code>can_refresh("c.s.v")</code>, step by step</h2>
+  <p>Click each step to open it. Every step names the real function and its file and line.
+  Use "find in index" to jump to the full description.</p>
+
+  <div class="trace" id="traceGate"></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-trace-advise">
+  <h2>3 · Trace: <code>advise("c.s.v")</code> — the advisory path</h2>
+  <p>The advisory path shares the walk and the history reads with the gate. Then it rolls the data up
+  into per-day finish times and two clock times.</p>
+
+  <div class="trace" id="traceAdvise"></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-classes">
+  <h2>4 · Class tour — all 15 classes</h2>
+  <p>Blue borders are public classes. Green borders are internal data shapes.
+  Frozen dataclasses carry data; they do not do I/O.</p>
+
+  <div class="grid c2">
+    <div class="card pub">
+      <h3>Workspace <span class="where">client.py:46</span></h3>
+      <p>The one door to the outside world. Thin wrapper over the Databricks SDK and the SQL Statement API.
+      Every external call in the package goes through this class, so tests can inject a fake.</p>
+      <table>
+        <tr><td>__init__()</td><td>resolves the engine: an explicit warehouse ID, $WAREHOUSE_ID, or a live Spark session</td></tr>
+        <tr><td>get_table()</td><td>raw UC metadata for one object, including view_dependencies</td></tr>
+        <tr><td>sql()</td><td>read-only statement; follows chunks; refuses a truncated result</td></tr>
+      </table>
+    </div>
+    <div class="card pub">
+      <h3>Config <span class="where">config.py:10</span></h3>
+      <p>Frozen dataclass. Four settings only: days_history=30, buffer_min=15,
+      timezone="Asia/Kolkata", fresh_hours=24. __post_init__ rejects zero or negative values.
+      tz is a computed property that builds a ZoneInfo.</p>
+    </div>
+    <div class="card dat">
+      <h3>ReadSummary <span class="where">gate.py:66</span></h3>
+      <p>What one history read tells the gate: latest, cadence, seen weekdays, the twice test, multi-daily, median runs.
+      Built by _history_summary().</p>
+    </div>
+    <div class="card pub">
+      <h3>Dependency <span class="where">gate.py:85</span></h3>
+      <p>One thing a view waits for, and its verdict: name, kind, ok, last_refresh, age_minutes, detail.
+      No methods. The gate builds one of these for every outcome — measured, cycle, unreadable, function note.</p>
+    </div>
+    <div class="card pub">
+      <h3>ViewResult <span class="where">gate.py:99</span></h3>
+      <p>One view's verdict: view, ready, dependencies. Method: blockers() returns the names of the
+      dependencies that hold it up.</p>
+    </div>
+    <div class="card pub">
+      <h3>GateResult <span class="where">gate.py:112</span></h3>
+      <p>The whole call's verdict: ready, views, fresh_hours, timezone.
+      Methods: blockers() (flattened, no repeats), to_dict() (JSON-ready), render() (the report),
+      __str__ (same as render).</p>
+    </div>
+    <div class="card pub">
+      <h3>Advice <span class="where">advice.py:45</span></h3>
+      <p>The advisory result: view, safe_time, earlier_time, next_day flags, day counts, timezone,
+      dependencies, unreadable, finished_by_day, warnings, text.
+      Methods: render() returns the text, to_dict() is JSON-ready, __str__ prints the text.</p>
+    </div>
+    <div class="card pub">
+      <h3>DependencyRun <span class="where">advice.py:29</span></h3>
+      <p>One upstream job for the advisory side: name, runs ("daily", "Mondays", ...), usual, latest,
+      days, missed, note. Built by _to_advice() from a DependencyRow.</p>
+    </div>
+    <div class="card dat">
+      <h3>Commit <span class="where">models.py:10</span></h3>
+      <p>One row of DESCRIBE HISTORY, or one MV refresh from the event log: version, timestamp,
+      operation, params (the mode lives here), metrics. The classifier eats this.</p>
+    </div>
+    <div class="card dat">
+      <h3>Skipped <span class="where">models.py:21</span></h3>
+      <p>A dependency that could not be resolved, and the reason. Never dropped silently —
+      it travels to the report.</p>
+    </div>
+    <div class="card dat">
+      <h3>TableHistory <span class="where">models.py:36</span></h3>
+      <p>What we learned about one gating table: finish_times (date → datetime),
+      metrics_degraded, continuous, unknown_ops. Built by summarize().</p>
+    </div>
+    <div class="card dat">
+      <h3>GatingTable <span class="where">walker.py:53</span></h3>
+      <p>A physical table that gates a view: name and kind. The walk returns these instead of bare names,
+      so the gate knows how to check each one.</p>
+    </div>
+    <div class="card dat">
+      <h3>WalkResult <span class="where">walker.py:61</span></h3>
+      <p>What one walk found: the gating tables, the blockers, and the notes. Built by walk().</p>
+    </div>
+    <div class="card dat">
+      <h3>DependencyRow <span class="where">recommend.py:22</span></h3>
+      <p>One report line for the advisory tool: name, refreshes, usual, worst, missed, observed_days,
+      degraded, continuous, outlier_day, unknown_ops.</p>
+    </div>
+    <div class="card dat">
+      <h3>Recommendation <span class="where">recommend.py:40</span></h3>
+      <p>The pure-math result: safe, earlier, n_days, span_days, rows, all_clear, safe_next_day,
+      earlier_next_day. Built by recommend(); consumed by report.py and advice.py.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-index">
+  <h2>5 · Function index — all 72 functions and methods</h2>
+  <p>Type to filter. Click a module chip to narrow. Rows marked <span class="tagm priv">private</span>
+  are helpers; the rest are part of the design.</p>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="search name, file, or what it does…" aria-label="Search functions">
+    <button data-m="all" class="on">All</button>
+    <button data-m="cli">cli</button>
+    <button data-m="advice">advice</button>
+    <button data-m="gate">gate</button>
+    <button data-m="walker">walker</button>
+    <button data-m="client">client</button>
+    <button data-m="history">history</button>
+    <button data-m="recommend">recommend</button>
+    <button data-m="report">report</button>
+    <button data-m="run">run</button>
+    <button data-m="config">config</button>
+    <button data-m="models">models</button>
+    <button data-m="obs">obs</button>
+    <button id="hidePriv">Hide private</button>
+  </div>
+
+  <div class="scroll">
+    <table id="idx">
+      <thead>
+        <tr><th style="width:230px">Function</th><th style="width:92px">Module</th><th>What it does</th><th style="width:220px">Calls (key)</th></tr>
+      </thead>
+      <tbody id="idxBody"></tbody>
+    </table>
+  </div>
+  <p id="idxCount" style="font-family:'Courier New',monospace;font-size:12px;color:var(--ink-mute)"></p>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-classify">
+  <h2>6 · The classifier, live</h2>
+  <p>history.py decides whether a commit counts as a refresh. Pick an operation and a mode.
+  This tool runs the same rules as <code>classify()</code>.</p>
+  <div class="clf">
+    <div class="card">
+      <label for="op">operation</label>
+      <select id="op">
+        <option>WRITE</option>
+        <option>MERGE</option>
+        <option>INSERT</option>
+        <option>INSERT OVERWRITE</option>
+        <option>COPY INTO</option>
+        <option>STREAMING UPDATE</option>
+        <option>MV REFRESH</option>
+        <option>CREATE OR REPLACE TABLE</option>
+        <option>OPTIMIZE</option>
+        <option>VACUUM</option>
+        <option>DELETE</option>
+        <option>TRUNCATE</option>
+        <option>CLONE</option>
+        <option>RESTORE</option>
+        <option>FSCK</option>
+      </select>
+    </div>
+    <div class="card">
+      <label for="mode">operationParameters.mode (WRITE only)</label>
+      <select id="mode">
+        <option>(absent)</option>
+        <option>Overwrite</option>
+        <option>Append</option>
+      </select>
+    </div>
+    <div class="card">
+      <label>verdict</label>
+      <p style="margin-top:10px"><span id="clsChip" class="chip incremental">incremental</span>
+      <span id="qualify" style="font-family:'Courier New',monospace;font-size:12.5px;margin-left:8px"></span></p>
+      <p id="clsWhy" style="font-size:13px;color:var(--ink-soft)"></p>
+    </div>
+  </div>
+  <div class="note">
+    <span class="tag">Why the mode matters</span>
+    <p>The commonest Delta operation is plain <code>WRITE</code>. Classify by name alone and most tables
+    read as dormant — a confident wrong answer, not an error. That is why the rule reads both fields.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="s-read">
+  <h2>7 · The order to read the code</h2>
+  <ol class="read">
+    <li><code>models.py</code> — the nouns. 45 lines. Learn Commit, Skipped, TableHistory.</li>
+    <li><code>config.py</code> — the four settings. 34 lines.</li>
+    <li><code>history.py</code> — the classifier. Pure, no I/O. Understand classify() and qualifying() first.</li>
+    <li><code>client.py</code> — the only I/O. Read the Workspace class and read_latest_commit().</li>
+    <li><code>walker.py</code> — the dependency walk, the cycle guard, the depth cap.</li>
+    <li><code>gate.py</code> — the product. can_refresh() then _verdict_for(). Then the report.</li>
+    <li><code>recommend.py</code> — pure arithmetic for the advisory times.</li>
+    <li><code>report.py</code> — the advice text and its warnings.</li>
+    <li><code>run.py</code> and <code>advice.py</code> — the advisory pipeline, end to end.</li>
+    <li><code>cli.py</code> and <code>obs.py</code> — the edges: command line and logging.</li>
+    <li><code>tests/</code> — the fake Workspace shows which calls the code makes.</li>
+  </ol>
+  <div class="note good">
+    <span class="tag">The shape of the whole package</span>
+    <p>I/O lives in one class. All the thinking lives in pure functions. The report is generated from
+    the result objects, never hand-written. The gate decides; it never writes.</p>
+  </div>
+</section>
+
+<footer>
+  view-scheduler 0.7.0 · line numbers from the source at this version · self-contained page ·
+  generated 2026-10-16
+</footer>
+
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- nav ----------
+  document.querySelectorAll("nav.toc button[data-go]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var el = document.getElementById(b.getAttribute("data-go"));
+      if (el) el.scrollIntoView({behavior:"smooth", block:"start"});
+    });
+  });
+  document.getElementById("theme").addEventListener("click", function(){
+    var root = document.documentElement;
+    var dark = root.getAttribute("data-theme") === "dark" ||
+      (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // ---------- module map ----------
+  var MODULES = {
+    init: { title:"__init__.py — the public API", file:"src/view_scheduler/__init__.py",
+      role:"The front door. It re-exports the names a user may import. Nothing else lives here.",
+      imports:"advice, client, config, gate, run",
+      contents:["advise", "Advice", "DependencyRun", "analyze", "can_refresh", "Config",
+                "Dependency", "GateResult", "ViewResult", "Workspace"] },
+    cli: { title:"cli.py — the command line", file:"src/view_scheduler/cli.py · 71 lines",
+      role:"Builds the argument parser, validates the warehouse ID early, calls advise(), prints text or JSON. It never touches the gate.",
+      imports:"obs, advice.advise, client.Workspace, config.Config",
+      contents:["build_parser() L16", "main() L43"] },
+    advice: { title:"advice.py — the advisory front door", file:"src/view_scheduler/advice.py · 181 lines",
+      role:"advise() runs the collector, wraps the result in an Advice object, prints the report. _to_advice() converts raw pieces into that object.",
+      imports:"report, client, config, models, recommend, run",
+      contents:["DependencyRun L29", "Advice L45 (render, to_dict, __str__)", "advise() L110", "_to_advice() L136", "_clock() L180"] },
+    run: { title:"run.py — the collector", file:"src/view_scheduler/run.py · 80 lines",
+      role:"The advisory pipeline in one place: walk the view, read each table's history, summarize it, recommend times. analyze() adds the rendered text.",
+      imports:"client, config, history, models, recommend, report, walker",
+      contents:["collect_history() L17", "collect = collect_history L61", "analyze() L64", "_reason() L74"] },
+    gate: { title:"gate.py — the product", file:"src/view_scheduler/gate.py · 490 lines",
+      role:"can_refresh() walks each view, asks one question per dependency, and returns a verdict plus a plain report. It never refreshes anything.",
+      imports:"client, config, history, recommend, walker",
+      contents:["IGNORED_MODES L60", "ReadSummary L66", "Dependency L85", "ViewResult L99 (blockers)", "GateResult L112 (blockers, to_dict, render)", "can_refresh() L190", "_history_summary() L308", "_verdict_for() L356", "_dep_line() L459", "_stamp() L473", "_human_age() L477", "_plural() L489"] },
+    walker: { title:"walker.py — the dependency walk", file:"src/view_scheduler/walker.py · 202 lines",
+      role:"Follows view_dependencies down to physical tables. Guards cycles, caps depth at 60, and returns one list for tables plus one for blockers and notes.",
+      imports:"client.failure_category, models.Skipped",
+      contents:["GATING L43", "GatingTable L53", "WalkResult L61", "walk() L69", "_view_dependencies() L78", "_Walk L112", "_reason() L195"] },
+    client: { title:"client.py — the only I/O", file:"src/view_scheduler/client.py · 389 lines",
+      role:"Every external call passes through Workspace. Metadata reads, SQL statements, chunk following, and the history readers live here. Read-only.",
+      imports:"obs, history.qualifying, models, databricks.sdk",
+      contents:["active_spark() L19", "quote_name() L33", "Workspace L46 (get_table, sql)", "workspace_from_env() L168", "failure_category() L173", "is_transient() L198", "with_retry() L235", "parse_json_field() L261", "_from_epoch() L276", "read_delta_history() L290", "read_mv_refreshes() L327", "read_commits() L352", "read_latest_commit() L371"] },
+    history: { title:"history.py — the pure classifier", file:"src/view_scheduler/history.py · 196 lines",
+      role:"Decides what counts as a refresh and builds per-day finish times. No I/O. Constants define the operation sets.",
+      imports:"models",
+      contents:["CONTINUOUS_COMMITS_PER_DAY L15", "MULTI_DAILY_COMMITS_PER_DAY L19", "FULL_REPLACE L22", "INCREMENTAL L32", "IGNORE L35", "classify() L52", "unknown_operations() L72", "has_metrics() L80", "qualifying() L85", "is_degraded() L94", "finish_times() L101", "qualifying_per_day() L117", "looks_continuous() L132", "looks_multi_daily() L141", "daily_slot_times() L150", "summarize() L186"] },
+    recommend: { title:"recommend.py — the advisory arithmetic", "file":"src/view_scheduler/recommend.py · 254 lines",
+      role:"Turns per-table finish times into safe and earlier clock times. Pure math: medians, weekday labels, outliers, the intersection of all-clear days.",
+      imports:"models",
+      contents:["WEEKDAYS L12", "OUTLIER_FLOOR_MIN L17", "OUTLIER_MAD_K L18", "DependencyRow L22", "Recommendation L40", "_weekday_label() L59", "_own_span() L81", "max_gap_days() L89", "dependency_rows() L106", "_to_seconds() L160", "_outlier_dates() L164", "_median_time() L185", "observed_span() L193", "recommend() L201", "_add_buffer() L244"] },
+    report: { title:"report.py — the advice text", file:"src/view_scheduler/report.py · 218 lines",
+      role:"Renders the advisory report: header, the two times, the dependency table, the day-by-day series, and warnings. Warnings print only when they apply.",
+      imports:"models, recommend",
+      contents:["render() L38", "all_clear_series() L112", "warnings() L149", "_hhmm L14 · _day_mark L18 · _plural L22 · _too_early L30"] },
+    config: { title:"config.py — four settings", file:"src/view_scheduler/config.py · 34 lines",
+      role:"Frozen dataclass: days_history, buffer_min, timezone, fresh_hours. Validation in __post_init__. The tz property returns a ZoneInfo. DEFAULT is the shared instance.",
+      imports:"dataclasses, zoneinfo",
+      contents:["Config L10", "__post_init__() L23", "tz property L30", "DEFAULT L34"] },
+    models: { title:"models.py — shared data shapes", file:"src/view_scheduler/models.py · 45 lines",
+      role:"Three frozen dataclasses with no logic: Commit, Skipped, TableHistory. Every module speaks these.",
+      imports:"dataclasses, datetime",
+      contents:["Commit L10", "Skipped L21", "TableHistory L36"] },
+    obs: { title:"obs.py — call logging", file:"src/view_scheduler/obs.py · 56 lines",
+      role:"One JSON log line per external call: kind, target, outcome, elapsed_ms. setup() attaches a stderr handler once.",
+      imports:"logging, json, time, contextlib",
+      contents:["logger L11", "setup() L14", "call() L25 (context manager)", "retry() L42"] }
+  };
+  var panel = document.getElementById("modPanel");
+  document.querySelectorAll(".map-shell .mod").forEach(function(g){
+    g.addEventListener("click", function(){
+      document.querySelectorAll(".map-shell .mod").forEach(function(x){ x.classList.remove("on"); });
+      g.classList.add("on");
+      var m = MODULES[g.getAttribute("data-mod")];
+      if (!m) return;
+      panel.innerHTML =
+        "<h3>" + esc(m.title) + "</h3>" +
+        "<p>" + esc(m.role) + "</p>" +
+        "<p class='mono'>file: " + esc(m.file) + "<br>imports: " + esc(m.imports) + "</p>" +
+        "<p style='margin-bottom:4px'><b>Inside:</b></p><ul>" +
+        m.contents.map(function(c){ return "<li>" + esc(c) + "</li>"; }).join("") +
+        "</ul>";
+    });
+  });
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  // ---------- traces ----------
+  var TRACE_GATE = [
+    { fn:"can_refresh()", where:"gate.py:190", body:[
+      "The public entry point of the gate. Accepts one view name or a list. Validates the window, pins the clock, builds a Workspace from $WAREHOUSE_ID when none is passed.",
+      "It builds two caches for the whole call: metadata and history. A table two views depend on is read once. A failure is remembered, not retried." ] },
+    { fn:"walk()", where:"walker.py:69", body:[
+      "Walks the view's dependency graph. A VIEW recurses; a physical table ends a branch. Cycle guard: resolved and active names are tracked apart. Depth cap 60.",
+      "Returns three things: the gating tables (GatingTable), blockers, and notes." ] },
+    { fn:"Workspace.get_table()", where:"client.py:94", body:[
+      "One raw UC metadata call per object. The walk uses it to learn table_type and view_dependencies. Through obs.call(), so the call is logged." ] },
+    { fn:"_view_dependencies()", where:"walker.py:78", body:[
+      "Splits a view payload into table names, function notes, and blockers. The name sits one level down: dependency[\"table\"][\"table_full_name\"]. A missing shape is a blocker, not a silent skip." ] },
+    { fn:"read_latest_commit()", where:"client.py:371", body:[
+      "The gate's one question: when did this table last really write? Reads the full history, keeps the newest qualifying commit, and ignores writes dated after the reference time (clock skew)." ] },
+    { fn:"read_commits()", where:"client.py:352", body:[
+      "Routes by object type. DESCRIBE HISTORY for tables and streaming tables; on the materialized-view error, the pipeline event log instead. Any other error propagates and becomes a blocker." ] },
+    { fn:"read_delta_history() · read_mv_refreshes()", where:"client.py:290 · 327", body:[
+      "The two readers. read_delta_history selects version, epoch timestamp, operation and parameters, ordered by version. read_mv_refreshes reads completed update_progress events from event_log(TABLE(mv)).",
+      "Timestamps arrive as epochs and become aware UTC datetimes — never a rendered string." ] },
+    { fn:"qualifying() → classify()", where:"history.py:85 → 52", body:[
+      "The classifier. Operation plus mode decide the class. Zero-row writes still qualify. Maintenance never does. An unknown operation is not counted — the conservative choice.",
+      "In read_latest_commit, only qualifying commits are kept." ] },
+    { fn:"_verdict_for()", where:"gate.py:356", body:[
+      "Turns one dependency's latest write into a Dependency: ok, last_refresh, age_minutes, detail. Unreadable → blocked. No qualifying write → blocked. Outside the window → stale with a reason." ] },
+    { fn:"GateResult.render()", where:"gate.py:159", body:[
+      "Builds the report text. One block per view; every dependency gets a line with its age; stale ones print first; blockers get an unblock line naming the view. Helper functions: _dep_line, _stamp, _human_age, _plural." ] }
+  ];
+  var TRACE_ADVISE = [
+    { fn:"cli.main()", where:"cli.py:43", body:[
+      "The command line: parses arguments, fails fast when the warehouse ID is missing, builds Config and Workspace, calls advise() with quiet=True, prints text or JSON." ] },
+    { fn:"advise()", where:"advice.py:110", body:[
+      "The advisory front door. Builds the workspace and the settings, calls collect(), wraps everything into an Advice object, prints the report unless quiet=True." ] },
+    { fn:"collect_history()", where:"run.py:17", body:[
+      "The shared pipeline: walk() the view, read_commits() for each gating table, summarize() each history, then recommend(). Failures on one table land in skipped and the pipeline continues." ] },
+    { fn:"walk()", where:"walker.py:69", body:[
+      "The advisory side of the walk. Same graph logic as the gate's walk(), but returns plain table names plus one merged skip list for the report." ] },
+    { fn:"summarize()", where:"history.py:186", body:[
+      "Rolls one table's commits into a TableHistory: finish_times (first qualifying commit per local day), metrics_degraded, continuous, unknown_ops." ] },
+    { fn:"finish_times() · looks_continuous()", where:"history.py:101 · 132", body:[
+      "finish_times keeps the FIRST qualifying commit of each local day — the advisory tool's core assumption. looks_continuous flags tables with a median of 6+ commits a day, because for those the finish time is only a floor." ] },
+    { fn:"recommend()", where:"recommend.py:201", body:[
+      "The pure roll-up: intersect all dependencies' finish days, keep the days where everything finished, take the latest normal finish as safe and the median of the normal days as earlier, then add the buffer with _add_buffer()." ] },
+    { fn:"dependency_rows()", where:"recommend.py:106", body:[
+      "Builds one DependencyRow per table: weekday label, median (usual), latest clock time (worst), missed days, and the outlier day when the worst day stands out by mean absolute deviation." ] },
+    { fn:"report.render()", where:"report.py:38", body:[
+      "Renders the whole text: header, the two times with day markers, the dependency table, the day-by-day series (all_clear_series), and the warnings." ] },
+    { fn:"report.warnings()", where:"report.py:149", body:[
+      "Prints a warning only when it applies: weekly tables, missed days, outliers, continuous tables, degraded metrics, unknown operations, midnight rollover, unreadable dependencies, thin evidence." ] },
+    { fn:"_to_advice()", where:"advice.py:136", body:[
+      "Converts the Recommendation plus skips into the frozen Advice object: dependency rows, finished_by_day, warnings, and the rendered text. to_dict() makes it JSON-ready." ] }
+  ];
+  function renderTrace(targetId, steps){
+    var el = document.getElementById(targetId);
+    steps.forEach(function(s, i){
+      var d = document.createElement("details");
+      d.className = "tstep";
+      d.innerHTML =
+        "<summary><span class='num'>" + String(i+1).padStart(2,"0") + "</span><span>" +
+        esc(s.body[0].split(".")[0]) + "</span><span class='fn'>" + esc(s.fn) + " · " + esc(s.where) + "</span></summary>" +
+        "<div class='body'>" +
+        s.body.map(function(p){ return "<p>" + esc(p) + "</p>"; }).join("") +
+        "<button class='linky' data-find='" + esc(s.fn.split("()")[0].split(" · ")[0]) + "'>find in index</button>" +
+        "</div>";
+      el.appendChild(d);
+      if (i < steps.length - 1){
+        var a = document.createElement("div");
+        a.className = "arrow";
+        a.textContent = "▼";
+        el.appendChild(a);
+      }
+    });
+  }
+  renderTrace("traceGate", TRACE_GATE);
+  renderTrace("traceAdvise", TRACE_ADVISE);
+
+  // ---------- function index ----------
+  // [name, module, line, signature, tags, desc, calls]
+  var IDX = [
+    ["build_parser","cli",16,"build_parser()","entry pub","Builds the argparse parser: view argument, --warehouse-id, --days, --buffer, --timezone, --json, --quiet.","argparse.ArgumentParser"],
+    ["main","cli",43,"main(argv)","entry pub io","CLI entry. Fails fast without a warehouse ID; builds Config and Workspace; calls advise(); prints text or JSON; returns an exit code.","build_parser, obs.setup, Workspace, advise"],
+    ["advise","advice",110,"advise(view, ws=None, config=None, *, today=None, quiet=False)","entry pub io","The advisory front door. Collects, builds the Advice object, prints the report unless quiet.","Workspace, collect_history, _to_advice"],
+    ["_to_advice","advice",136,"_to_advice(view, result, skipped, config)","priv pure","Converts a Recommendation plus skips into a frozen Advice. Derives earlier, next-day flags, finished_by_day, warnings, text.","report.warnings, report.render, _clock"],
+    ["_clock","advice",180,"_clock(value)","priv pure","Formats a time as HH:MM, or None for None.","—"],
+    ["Advice.render","advice",65,"render()","pub pure","Returns the report text stored when the object was built.","—"],
+    ["Advice.to_dict","advice",68,"to_dict()","pub pure","JSON-ready dict: times, day counts, dependency rows, unreadable list, finished_by_day, warnings.","_clock"],
+    ["Advice.__str__","advice",106,"__str__()","pub pure","Returns the same text as render().","—"],
+    ["ReadSummary","gate",66,"ReadSummary(...)","pub data","What one history read tells the gate: the latest write, the cadence, the seen weekdays, the twice test, and the runs per day.","—"],
+    ["can_refresh","gate",190,"can_refresh(views, ws=None, config=None, *, now=None, fresh_hours=None, ignore_non_daily=False, ignore_tables=(), check_multi_daily=False, quiet=False)","entry pub io","The gate. Walks each view, measures every dependency against its own window, returns a GateResult and prints the report.","walk, _history_summary, _verdict_for, Workspace"],
+    ["_history_summary","gate",308,"_history_summary(workspace, name, moment, settings, not_after)","priv io","One ReadSummary for a dependency: the latest qualifying write, the cadence label, and the twice test.","read_commits, finish_times, _weekday_label, _own_span, qualifying_per_day"],
+    ["_verdict_for","gate",356,"_verdict_for(ref, history, cutoff, moment, window, *, ...)","priv pure","One dependency's verdict. The window follows the table's own schedule; the trust guard fails closed.","max_gap_days"],
+    ["_dep_line","gate",459,"_dep_line(dep, zone)","priv pure","One report line for a dependency: mark, name, kind, last refresh, age, and the reason when stale.","_stamp, _human_age"],
+    ["_stamp","gate",473,"_stamp(value, zone)","priv pure","Render a datetime in the config timezone with its zone abbreviation.","—"],
+    ["_human_age","gate",477,"_human_age(minutes)","priv pure","Ages in human form: 45m, 11h 48m, 2d 8h.","—"],
+    ["_plural","gate",489,"_plural(count, word)","priv pure","Adds the plural s, or not, for one and many.","—"],
+    ["ViewResult.blockers","gate",106,"blockers()","pub pure","Names of the dependencies that hold this view up.","—"],
+    ["GateResult.blockers","gate",120,"blockers()","pub pure","Every blocking dependency across all views, in order, without repeats.","ViewResult.blockers"],
+    ["GateResult.to_dict","gate",129,"to_dict()","pub pure","JSON-ready gate result, safe to log from a job.","—"],
+    ["GateResult.render","gate",159,"render()","pub pure","The gate report: header, one block per view, dependency lines with ages, and the unblock list.","_dep_line, _plural"],
+    ["GateResult.__str__","gate",186,"__str__()","pub pure","Returns the same text as render().","—"],
+    ["_view_dependencies","walker",78,"_view_dependencies(meta)","priv pure","Splits a view payload into (table names, blockers, notes). Reads dependency[\"table\"][\"table_full_name\"]. A function becomes a note; an odd shape a blocker.","—"],
+    ["walk","walker",69,"walk(view, fetch, max_depth=60)","pub pure","The full walk. Recurses views, ends at physical tables, guards cycles with done and on_stack sets, caps depth. Returns a WalkResult: tables, blockers, notes.","_view_dependencies, _reason"],
+    ["_reason","walker",195,"_reason(exc)","priv pure","Short reason for a walk failure: permission, not found, or the exception type and message.","failure_category"],
+    ["active_spark","client",19,"active_spark()","pub io","The live SparkSession in this process, or None. A laptop with no pyspark gets None, not an error.","SparkSession.getActiveSession"],
+    ["quote_name","client",33,"quote_name(full_name)","pub pure","Backticks each dot-separated part of a UC name and doubles inner backticks. A hyphen is subtraction without it.","—"],
+    ["workspace_from_env","client",168,"workspace_from_env()","pub io","Retired: resolution now lives in Workspace(). Returns Workspace().","Workspace"],
+    ["failure_category","client",173,"failure_category(exc)","pub pure","Classifies an error as permission, not_found, mv_no_history, or other — by the message text.","—"],
+    ["is_transient","client",198,"is_transient(exc)","priv pure","True when a failed read is worth one more attempt. A status code decides first; then the error words.","—"],
+    ["with_retry","client",235,"with_retry(fn, *, kind, target, attempts=3, sleep=None)","priv io","Calls fn. Retries a passing failure, gives up on a lasting one. Three attempts, waits 1s then 2s. Reads only.","is_transient, _retry_wait, obs.retry"],
+    ["parse_json_field","client",261,"parse_json_field(value)","pub pure","Parses a JSON string or passes a dict through. None when absent or unparseable.","json.loads"],
+    ["_from_epoch","client",276,"_from_epoch(value)","priv pure","Epoch seconds to an aware UTC datetime. The same instant in every time zone.","datetime.fromtimestamp"],
+    ["read_delta_history","client",290,"read_delta_history(ws, table, *, with_metrics=True, since_epoch=None)","pub io","DESCRIBE HISTORY for one table: version, epoch timestamp, operation, parameters. Ordered newest first.","Workspace.sql, quote_name, _from_epoch, parse_json_field"],
+    ["read_mv_refreshes","client",327,"read_mv_refreshes(ws, mv, *, since_epoch=None)","pub io","Completed refreshes of an MV from its pipeline event log (update_progress, state COMPLETED).","Workspace.sql, quote_name, _from_epoch"],
+    ["read_commits","client",352,"read_commits(ws, table, *, with_metrics=True, since_epoch=None)","pub io","History for any physical object. DESCRIBE HISTORY first; the pipeline event log when the object is a materialized view.","read_delta_history, read_mv_refreshes"],
+    ["read_latest_commit","client",371,"read_latest_commit(ws, table, *, not_after=None, since_epoch=None)","pub io","The gate's one question: the newest qualifying write, or None. Ignores writes after not_after (clock skew).","read_commits, qualifying"],
+    ["Workspace.__init__","client",67,"__init__(warehouse_id=None, client=None, spark=None)","pub io","Holds the SDK client, the warehouse ID, and the Spark session. Resolves the engine; tests inject a fake here.","active_spark"],
+    ["Workspace.get_table","client",94,"get_table(full_name)","pub io","Raw UC metadata for one object, including view_dependencies. Percent-encoded path. Retried on a passing failure.","obs.call, with_retry"],
+    ["Workspace.sql","client",108,"sql(statement, target)","pub io","Runs one read-only statement. Follows result chunks to the end, refuses a truncated result, returns rows as dicts.","obs.call, with_retry"],
+    ["classify","history",52,"classify(commit)","pub pure","Operation plus mode decide the class: full_replace, incremental, ignore, or unknown. WRITE is read with its mode.","—"],
+    ["unknown_operations","history",72,"unknown_operations(commits)","pub pure","Names the operations we could not classify, sorted. The advisory report shows them.","classify"],
+    ["has_metrics","history",80,"has_metrics(commit)","pub pure","False when the writer emitted no usable metrics (None or empty).","—"],
+    ["qualifying","history",85,"qualifying(commit)","pub pure","The whole rule: any full replace or incremental write counts, even zero rows. Unknown does not count.","classify"],
+    ["is_degraded","history",94,"is_degraded(commits)","pub pure","True when an incremental commit carried no metrics — we saw it run, not what it wrote.","classify, has_metrics"],
+    ["finish_times","history",101,"finish_times(commits, today, days, tz)","pub pure","First qualifying commit of each local day → {date: timestamp}. The advisory tool's core assumption.","qualifying"],
+    ["qualifying_per_day","history",117,"qualifying_per_day(commits, today, days, tz)","pub pure","How many qualifying commits landed on each day in the window.","qualifying"],
+    ["looks_continuous","history",132,"looks_continuous(commits, today, days, tz)","pub pure","True when the median commits per day is 6 or more — the finish time is only a floor.","qualifying_per_day"],
+    ["summarize","history",186,"summarize(name, commits, today, days, tz)","pub pure","One table's TableHistory: finish_times, metrics_degraded, continuous, unknown_ops.","finish_times, is_degraded, looks_continuous, unknown_operations"],
+    ["_weekday_label","recommend",59,"_weekday_label(days, span, own=None)","priv pure","Words for the observed pattern: daily, Mondays, Mon,Thu, or never. The table's own span decides daily.","—"],
+    ["_own_span","recommend",81,"_own_span(days)","priv pure","The contiguous range from the table's first write day to its last.","—"],
+    ["max_gap_days","recommend",89,"max_gap_days(seen)","pub pure","The longest cyclic gap between run weekdays: Mon-Fri 3, Mon-Sat 2, Mondays-only 7, daily 1.","—"],
+    ["dependency_rows","recommend",106,"dependency_rows(histories, span, buffer_min=0)","pub pure","One DependencyRow per table: label, usual (median), worst (latest clock time), missed, observed days, outlier day.","_weekday_label, _own_span, _median_time, _outlier_dates"],
+    ["_to_seconds","recommend",160,"_to_seconds(t)","priv pure","Clock time to seconds since midnight, for the medians.","—"],
+    ["_outlier_dates","recommend",164,"_outlier_dates(finish_times)","priv pure","The one outlier rule: days above the median by 30+ minutes and 3 mean absolute deviations.","_to_seconds"],
+    ["_median_time","recommend",185,"_median_time(times)","priv pure","The median clock time of a sequence.","statistics.median"],
+    ["observed_span","recommend",193,"observed_span(histories)","pub pure","The contiguous date range from the earliest to the latest refresh seen anywhere.","—"],
+    ["recommend","recommend",201,"recommend(histories, buffer_min)","pub pure","The roll-up: intersect finish days, take the latest all-clear time as safe and the median as earlier, add the buffer. Returns a Recommendation.","observed_span, dependency_rows, _add_buffer"],
+    ["_add_buffer","recommend",244,"_add_buffer(moment, minutes)","priv pure","Adds the buffer and reports whether it crossed midnight.","—"],
+    ["render","report",38,"render(view, result, skipped, timezone)","pub pure","The whole advice text: header, two times, dependency table, day series, warnings.","_hhmm, _plural, _day_mark, _too_early, all_clear_series, warnings"],
+    ["all_clear_series","report",112,"all_clear_series(result)","pub pure","The evidence block: which day set the SCHEDULE AT time. The earlier time is a median, so no single day sets it.","—"],
+    ["warnings","report",149,"warnings(result, skipped)","pub pure","Every warning that applies, in plain words: weekly, missed, outlier, continuous, degraded, unknown ops, midnight, unreadable, thin evidence.","_plural, _hhmm"],
+    ["_hhmm","report",14,"_hhmm(value)","priv pure","Time as HH:MM, or an em dash for None.","—"],
+    ["_day_mark","report",18,"_day_mark(next_day)","priv pure","The (+1 day) marker when the buffer crossed midnight.","—"],
+    ["_plural","report",22,"_plural(n, word)","priv pure","Grammar for counts, with y-to-ies handling.","—"],
+    ["_too_early","report",30,"_too_early(result)","priv pure","How many observed days would have been too early at the earlier time.","—"],
+    ["collect_history","run",17,"collect_history(view, ws, config, today=None)","pub io","The shared pipeline: walk, read, summarize, recommend. Failures land in skipped; the run continues.","walk, read_commits, summarize, recommend, _reason"],
+    ["analyze","run",64,"analyze(view, ws, config, today=None)","pub io","The low-level call: report text, per-table histories, skips. Prefer advise() unless you need the raw pieces.","collect_history, render"],
+    ["_reason","run",74,"_reason(exc)","priv pure","Plain reason for a skipped dependency: permission, MV event log, or the raw error.","failure_category"],
+    ["Config.__post_init__","config",23,"__post_init__()","pub pure","Rejects fresh_hours and days_history at zero or below. Fails loudly, not silently.","—"],
+    ["Config.tz","config",30,"tz (property)","pub pure","Builds a ZoneInfo from the timezone string.","ZoneInfo"],
+    ["setup","obs",14,"setup(level=INFO)","pub io","Attaches a stderr handler to the package logger, once.","logging.StreamHandler"],
+    ["call","obs",25,"call(kind, target, **extra)","pub io","Context manager. Times one external call and logs one JSON line, whether it succeeds or raises.","logger.info"]
+  ];
+  var idxBody = document.getElementById("idxBody");
+  var q = document.getElementById("q");
+  var hidePriv = false;
+  var modFilter = "all";
+  function applyFilter(){
+    var term = q.value.trim().toLowerCase();
+    var rows = idxBody.querySelectorAll("tr");
+    var shown = 0;
+    rows.forEach(function(tr){
+      var m = tr.getAttribute("data-m");
+      var priv = tr.getAttribute("data-p") === "1";
+      var text = tr.getAttribute("data-s");
+      var ok = (modFilter === "all" || m === modFilter) && (!hidePriv || !priv) &&
+               (term === "" || text.indexOf(term) !== -1);
+      tr.style.display = ok ? "" : "none";
+      if (ok) shown++;
+    });
+    document.getElementById("idxCount").textContent = shown + " of " + rows.length + " shown";
+  }
+  IDX.forEach(function(row){
+    var name = row[0], mod = row[1], line = row[2], sig = row[3], tags = row[4], desc = row[5], calls = row[6];
+    var tr = document.createElement("tr");
+    var priv = tags.indexOf("priv") !== -1;
+    tr.setAttribute("data-m", mod);
+    tr.setAttribute("data-p", priv ? "1" : "0");
+    tr.setAttribute("data-s", (name + " " + mod + " " + sig + " " + desc + " " + tags).toLowerCase());
+    var shownName = name.indexOf(".") !== -1
+      ? name.replace(".", "<span class='cl'>.</span>")
+      : name;
+    var tagHtml = tags.split(" ").map(function(t){
+      var cls = t === "pub" ? "pub" : t === "priv" ? "priv" : t === "io" ? "io" : t === "pure" ? "pure" : "entry";
+      return "<span class='tagm " + cls + "'>" + esc(t) + "</span>";
+    }).join("");
+    tr.innerHTML =
+      "<td><span class='fname'>" + shownName + "()</span><br><span style='font-family:\"Courier New\",monospace;font-size:11px;color:var(--ink-mute)'>" +
+      esc(sig) + " · L" + line + "</span></td>" +
+      "<td><span class='fmod'>" + esc(mod) + ".py</span><br>" + tagHtml + "</td>" +
+      "<td class='fdesc'>" + esc(desc) + "</td>" +
+      "<td class='calls'>" + esc(calls) + "</td>";
+    idxBody.appendChild(tr);
+  });
+  q.addEventListener("input", applyFilter);
+  document.querySelectorAll(".controls button[data-m]").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll(".controls button[data-m]").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      modFilter = b.getAttribute("data-m");
+      applyFilter();
+    });
+  });
+  document.getElementById("hidePriv").addEventListener("click", function(){
+    hidePriv = !hidePriv;
+    this.classList.toggle("on", hidePriv);
+    this.textContent = hidePriv ? "Show private" : "Hide private";
+    applyFilter();
+  });
+  applyFilter();
+
+  // "find in index" buttons inside traces and the module panel
+  document.addEventListener("click", function(e){
+    var b = e.target.closest ? e.target.closest(".linky") : null;
+    if (!b) return;
+    var name = b.getAttribute("data-find");
+    q.value = name;
+    modFilter = "all";
+    document.querySelectorAll(".controls button[data-m]").forEach(function(x){
+      x.classList.toggle("on", x.getAttribute("data-m") === "all");
+    });
+    applyFilter();
+    document.getElementById("s-index").scrollIntoView({behavior:"smooth", block:"start"});
+  });
+
+  // ---------- classifier ----------
+  var FULL_REPLACE = ["CREATE OR REPLACE TABLE","CREATE OR REPLACE TABLE AS SELECT","CREATE TABLE AS SELECT","REPLACE TABLE AS SELECT","INSERT OVERWRITE","TRUNCATE AND INSERT"];
+  var INCREMENTAL = ["MERGE","UPDATE","COPY INTO","STREAMING UPDATE","INSERT"];
+  var IGNORE = ["OPTIMIZE","VACUUM","VACUUM START","VACUUM END","DELETE","TRUNCATE","SET TBLPROPERTIES","UNSET TBLPROPERTIES","CHANGE COLUMN","ADD COLUMNS","RESTORE","CLONE","ADD CONSTRAINT","DROP CONSTRAINT","LIQUID CLUSTERING","RENAME COLUMN","UPGRADE PROTOCOL","SET COLUMN COMMENT"];
+  function classify(op, mode){
+    var o = op.toUpperCase();
+    if (IGNORE.indexOf(o) !== -1) return "ignore";
+    if (FULL_REPLACE.indexOf(o) !== -1 || (o === "WRITE" && mode === "Overwrite")) return "full_replace";
+    if (INCREMENTAL.indexOf(o) !== -1 || (o === "WRITE" && mode === "Append")) return "incremental";
+    if (o === "WRITE") return "incremental";
+    if (o === "MV REFRESH") return "full_replace";
+    return "unknown";
+  }
+  var WHY = {
+    full_replace: "A full rebuild. Counts as a refresh — even with zero rows.",
+    incremental: "Rows were added or changed. Counts as a refresh — even with zero rows.",
+    ignore: "Maintenance or metadata. It never counts as a refresh, whatever it touched.",
+    unknown: "Not counted — the conservative choice. The advisory report names it so the silence is broken."
+  };
+  var opSel = document.getElementById("op");
+  var modeSel = document.getElementById("mode");
+  function updateClassify(){
+    var c = classify(opSel.value, modeSel.value);
+    var chip = document.getElementById("clsChip");
+    chip.className = "chip " + c;
+    chip.textContent = c;
+    var q2 = (c === "full_replace" || c === "incremental");
+    document.getElementById("qualify").textContent = q2 ? "qualifies as a refresh ✓" : "does NOT qualify";
+    document.getElementById("qualify").style.color = q2 ? "var(--good)" : "var(--crit)";
+    document.getElementById("clsWhy").textContent = WHY[c];
+    var writeMode = opSel.value === "WRITE";
+    modeSel.disabled = !writeMode;
+    if (!writeMode) modeSel.value = "(absent)";
+  }
+  opSel.addEventListener("change", updateClassify);
+  modeSel.addEventListener("change", updateClassify);
+  updateClassify();
+
+})();
+</script>
+</body>
+</html>
