@@ -1,5 +1,6 @@
 """Phase 4 gate: warnings appear only when they apply. Plain words only."""
 
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 from view_scheduler.models import Skipped, TableHistory
@@ -50,6 +51,32 @@ def test_no_overlapping_days_says_so_instead_of_inventing_a_time():
     text = render("c.s.v", recommend([a, b], 15), [], "Asia/Kolkata")
     assert "NO TIME TO SUGGEST" in text
     assert "SCHEDULE AT" not in text
+
+
+def test_unreadable_dependency_gets_its_own_no_time_wording():
+    """run.py withholds the times when a dependency cannot be read. The report
+    must say why, and still print the evidence it could read. The wording stays
+    distinct from the no-common-day case."""
+    result = recommend([history("c.s.a"), history("c.s.b", "03:30")], 15)
+    blocked = replace(result, safe=None, earlier=None, usual=None,
+                      safe_without_outliers=None, safe_next_day=False,
+                      earlier_next_day=False,
+                      safe_without_outliers_next_day=False, usual_next_day=False)
+    text = render("c.s.v", blocked, [Skipped(
+        "c.s.secret", "permission denied — cannot read its history")],
+        "Asia/Kolkata")
+    assert "NO TIME TO SUGGEST — 1 dependency could not be read." in text
+    assert "The times below cover only the 2 dependencies that were read." in text
+    assert "there is no day where every job had finished" not in text
+    assert "WHEN THE LAST JOB FINISHED" in text   # readable evidence still prints
+
+
+def test_the_no_common_day_wording_is_not_the_unreadable_wording():
+    a = TableHistory("c.s.a", {DAYS[0]: f.at(DAYS[0].isoformat(), "04:00")}, False)
+    b = TableHistory("c.s.b", {DAYS[5]: f.at(DAYS[5].isoformat(), "04:00")}, False)
+    text = render("c.s.v", recommend([a, b], 15), [], "Asia/Kolkata")
+    assert "there is no day where every job had finished" in text
+    assert "could not be read" not in text
 
 
 def test_counts_read_grammatically_at_one_and_many():

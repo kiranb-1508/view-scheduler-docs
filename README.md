@@ -106,6 +106,13 @@ print(advice)                 # the report
 `advise` prints the report and returns an `Advice`. Nothing is dropped
 silently — anything unreadable comes back in `advice.unreadable` with a reason.
 
+An unreadable dependency removes the headline. If even one input cannot be
+read, `advise` prints no `SCHEDULE AT` time and returns `safe_time is None`,
+because a time computed without one input is not a safe time. The report still
+shows the tables it could read, and says how many could not be read. A function
+dependency (a SQL UDF) has no refresh to wait for, so it never removes the
+headline.
+
 `analyze` is the low-level call. It returns a tuple
 `(text, histories, skipped)` for code that needs the raw per-table history.
 

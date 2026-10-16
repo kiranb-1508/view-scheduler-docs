@@ -97,6 +97,41 @@ def test_unreadable_dependency_is_carried_and_reported():
     assert advice.to_dict()["unreadable"][0]["name"] == "c.s.t2"
 
 
+def test_an_unreadable_dependency_removes_the_headline():
+    # A view with 2 readable tables and 1 table whose DESCRIBE HISTORY
+    # raises a permission error.
+    times = {
+        "c.s.t1": {"2026-08-04": "03:00", "2026-08-05": "03:00",
+                   "2026-08-06": "03:00"},
+        "c.s.t2": {"2026-08-04": "04:00", "2026-08-05": "04:00",
+                   "2026-08-06": "04:00"},
+        "c.s.t3": {"2026-08-04": "04:30", "2026-08-05": "04:30",
+                   "2026-08-06": "04:30"},
+    }
+    ws = workspace(times, errors={"c.s.t3": RuntimeError(
+        "User does not have SELECT on c.s.t3")})
+    advice = advise("c.s.v", ws, CONFIG, today=TODAY, quiet=True)
+    assert advice.safe_time is None
+    assert advice.usual_time is None
+    assert "could not be read" in advice.text
+    assert advice.to_dict()["safe_time"] is None
+
+
+def test_a_function_dependency_keeps_the_headline():
+    # A view whose only skip is a UDF note. SCHEDULE AT still prints, and the
+    # note still appears in warnings.
+    tables = {"c.s.v": f.uc_view("c.s.v", ["c.s.t1"], functions=1),
+              "c.s.t1": f.uc_table("c.s.t1")}
+    history = {"c.s.t1": [commit(day, hhmm)
+                          for day, hhmm in BUSY["c.s.t1"].items()]}
+    ws = FakeWorkspace(tables=tables, history=history)
+    advice = advise("c.s.v", ws, CONFIG, today=TODAY, quiet=True)
+    assert advice.safe_time is not None
+    assert "SCHEDULE AT" in advice.text
+    assert "function dependency" in advice.render()
+    assert any("main.default.udf_0" in warning for warning in advice.warnings)
+
+
 def test_advice_is_frozen_and_typed():
     advice = advise("c.s.v", workspace(BUSY), CONFIG, today=TODAY, quiet=True)
     assert isinstance(advice, Advice)

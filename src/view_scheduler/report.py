@@ -73,9 +73,18 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
             lines.append(f"       EARLIER      {_hhmm(result.earlier)}"
                          f"{_day_mark(result.earlier_next_day)}    {note}")
     else:
-        lines.append("       NO TIME TO SUGGEST — there is no day where every "
-                     "job had finished.")
-        lines.append("       The table below shows which jobs did not run.")
+        blocking = [item for item in skipped if item.blocks]
+        if blocking:
+            lines.append(
+                f"       NO TIME TO SUGGEST — "
+                f"{_plural(len(blocking), 'dependency')} could not be read.")
+            lines.append(
+                f"       The times below cover only the "
+                f"{_plural(len(result.rows), 'dependency')} that were read.")
+        else:
+            lines.append("       NO TIME TO SUGGEST — there is no day where every "
+                         "job had finished.")
+            lines.append("       The table below shows which jobs did not run.")
     lines.append("")
 
     if result.rows:

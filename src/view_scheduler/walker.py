@@ -102,7 +102,8 @@ def _view_dependencies(meta: dict) -> tuple[list[str], list[Skipped], list[Skipp
         fn_name = (function.get("function_full_name")
                    if isinstance(function, dict) else None)
         if isinstance(fn_name, str) and fn_name:
-            notes.append(Skipped(fn_name, "function dependency — nothing to refresh"))
+            notes.append(Skipped(fn_name, "function dependency — nothing to refresh",
+                                 blocks=False))
             continue
         blockers.append(Skipped(str(dependency)[:80], "unrecognised dependency shape"))
     return names, blockers, notes
