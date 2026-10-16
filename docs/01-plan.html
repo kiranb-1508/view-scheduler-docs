@@ -121,9 +121,9 @@ def refreshed_today(t):
       <thead><tr><th>Deleted</th><th>Replaced by</th><th>Add back when</th></tr></thead>
       <tbody>
         <tr><td class="cut">8-class cadence classifier</td><td>A "refreshes" column showing observed days</td><td>Never — a human reads this faster than a classifier decides it</td></tr>
-        <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>A table refreshes many times daily and you need a later slot</td></tr>
+        <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>Already back (0.6.0)</td></tr>
         <tr><td class="cut">Cycle attribution + cutover detection</td><td>Calendar day</td><td>A pipeline genuinely straddles midnight — then set the day boundary by hand</td></tr>
-        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "typical"</td><td>You have 100+ days of history, which you won't for a year</td></tr>
+        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "typical"</td><td>Already back (0.6.0)</td></tr>
         <tr><td class="cut">Changepoint detection</td><td>The 30 days are on screen</td><td>You automate the check and no human reads the output</td></tr>
         <tr><td class="cut">Tolerance bands, outlier rules</td><td><em>Nothing — this row was wrong.</em> The gate no longer replaces the outlier check: the gate guards the run, the analyzer still names the day pinning <code>safe</code></td><td>Already back</td></tr>
         <tr><td class="cut">Timing/reliability split</td><td>A "missed" column</td><td>Never</td></tr>

@@ -25,7 +25,7 @@ refresh runs. Set the schedule from history; guard the run with the gate.
 
 **The arithmetic is still being validated.** A 30-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
-commit history. Until that completes, treat output as indicative. Hence `0.6.0`.
+commit history. Until that completes, treat output as indicative. Hence `0.7.0`.
 
 ## Install
 
@@ -45,7 +45,7 @@ Build and upload a release:
 
 ```bash
 python -m build --wheel
-databricks fs cp dist/view_scheduler-0.6.0-py3-none-any.whl \
+databricks fs cp dist/view_scheduler-0.7.0-py3-none-any.whl \
   dbfs:/Volumes/<catalog>/<schema>/libs/
 ```
 
@@ -54,7 +54,7 @@ Keep old versions in the volume so running jobs can stay pinned.
 Then, in a notebook:
 
 ```python
-%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.6.0-py3-none-any.whl
+%pip install /Volumes/<catalog>/<schema>/libs/view_scheduler-0.7.0-py3-none-any.whl
 dbutils.library.restartPython()
 ```
 
@@ -64,7 +64,7 @@ Or as a job library, including from a DAB:
 tasks:
   - task_key: recommend
     libraries:
-      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.6.0-py3-none-any.whl
+      - whl: /Volumes/<catalog>/<schema>/libs/view_scheduler-0.7.0-py3-none-any.whl
 ```
 
 ### From source
@@ -139,8 +139,9 @@ rerun pushed the last job much later than usual.
 - `EARLIER` — the typical day's finish, plus the buffer. It is the median of the
   normal days, so the outlier days and the occasional slow load do not move it.
   It leaves out the days that missed a dependency, because no schedule time
-  fixes a table that skipped a day. `advice.earlier_time` carries it, and it
-  always equals `advice.usual_time`.
+  fixes a table that skipped a day. `advice.earlier_time` carries it. It is
+  `None` when it equals the SCHEDULE AT time. `advice.usual_time` carries the
+  value in every case.
 
 When there are no outlier days the report keeps the two-line shape:
 `SCHEDULE AT` and `EARLIER` only. `advice.safe_without_outliers` carries the
@@ -338,7 +339,7 @@ is tried again, twice. A read that fails for a lasting reason blocks at once.
 | [docs/03-impact-design.html](docs/03-impact-design.html) | Impact analysis: given a table, what depends on it. Separate tool, separate data source |
 | [docs/04-library-flow.html](docs/04-library-flow.html) | Visual end-to-end flow: input, functions, branches, recommendation, and report |
 | [docs/05-interactive-guide.html](docs/05-interactive-guide.html) | Interactive guide: clickable flow, a gate simulator, the design decisions, and the open findings |
-| [docs/06-code-walkthrough.html](docs/06-code-walkthrough.html) | Code walkthrough: the module map, call traces, a class tour, and a searchable index of all 66 functions |
+| [docs/06-code-walkthrough.html](docs/06-code-walkthrough.html) | Code walkthrough: the module map, call traces, a class tour, and a searchable index of all 72 functions |
 | [rig/README.md](rig/README.md) | The 30-day fixture rig and its checkpoints |
 | [GENIE-PROMPT.md](GENIE-PROMPT.md) | Build prompt for Databricks Genie Code, phased with verification gates |
 
@@ -362,6 +363,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-221 tests, all offline — no Spark session, no network, no credentials.
+270 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
 `rig/` builds and checks the 30-day fixture. Neither ships in the wheel.
