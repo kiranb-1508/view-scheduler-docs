@@ -5,7 +5,13 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from view_scheduler.models import TableHistory
-from view_scheduler.recommend import _outlier_dates, dependency_rows, recommend
+from view_scheduler.recommend import (
+    _outlier_dates,
+    _weekday_label,
+    dependency_rows,
+    max_gap_days,
+    recommend,
+)
 from tests import fixtures as f
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -81,6 +87,36 @@ def test_a_weekly_dependency_is_labelled_not_marked_as_missing():
     row = next(r for r in result.rows if r.name == "products")
     assert row.refreshes == "Mons"
     assert row.missed == 0, "a weekly table has not missed the days it never runs"
+
+
+# --- the weekday label --------------------------------------------------------
+
+def test_mon_to_sat_is_not_daily():
+    """Six of seven weekdays must not read as "daily".
+
+    The old `len(seen) >= 6` fallback hid a Mon-Sat table. Its real schedule
+    is the six weekdays it runs on.
+    """
+    span = [date(2026, 8, 1) + timedelta(days=i) for i in range(30)]
+    days = [d for d in span if d.weekday() != 6]      # every day but Sunday
+    assert _weekday_label(days, span, days) == "Mon,Tue,Wed,Thu,Fri,Sat"
+
+
+def test_a_table_created_mid_window_is_still_daily():
+    """A table born on day 10 of the window wrote every day of its own life,
+    so it reads "daily". The coverage test uses the table's own span, not the
+    whole window.
+    """
+    span = [date(2026, 8, 1) + timedelta(days=i) for i in range(30)]
+    own = span[10:]
+    assert _weekday_label(list(own), span, own) == "daily"
+
+
+def test_gap_days_computes_the_cyclic_gap():
+    assert max_gap_days(frozenset({0, 1, 2, 3, 4})) == 3      # Fri -> Mon
+    assert max_gap_days(frozenset({0})) == 7                   # Mondays only
+    assert max_gap_days(frozenset({0, 1, 2, 3, 4, 5})) == 2    # Sat -> Mon
+    assert max_gap_days(frozenset(range(7))) == 1             # every day
 
 
 def test_no_overlapping_days_yields_no_recommendation_rather_than_a_wrong_one():

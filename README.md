@@ -168,7 +168,9 @@ access token are needed there. On a laptop only options 1 and 2 exist.
 
 Before you materialize a view, ask whether its inputs are actually fresh. The
 gate walks every dependency and checks that its last real write is inside a
-rolling window (24 hours by default).
+rolling window. A daily table gets 24 hours by default. A table that runs less
+often gets a wider window, so a Monday morning does not always block a
+Monday-to-Friday table.
 
 ```python
 from view_scheduler import can_refresh
@@ -212,9 +214,33 @@ are the whole table:
 | Wrote before the window | stale — **blocks** |
 | No qualifying write in its history | **blocks** |
 | Cannot be read (missing, no permission) | **blocks** — the gate fails closed |
+| A weekly-ish table on a trusted schedule | checked against its own wider window — see below |
+| A table with a thin or new history | checked on the daily window, whatever it looks like |
 | Streaming table | checked from its history, like any table — one on a schedule is stale between runs |
 | Materialized view | read from its pipeline event log |
 | Function dependency (a UDF) | a note, not a blocker |
+
+#### Each table is checked against its own schedule
+
+A daily table gets the `fresh_hours` window. A table that runs less often gets
+a wider window.
+
+The gate reads the weekdays the table actually wrote on. The window is the
+longest gap between those run weekdays, plus one, times `fresh_hours`:
+
+| Pattern | Window at `fresh_hours=24` |
+|---|---|
+| Every day | 24h |
+| Monday to Saturday | 72h |
+| Monday to Friday | 96h |
+| Mondays only | 192h |
+
+The gate uses this wider window only for a trusted table. A trusted table has
+at least ten run days in the read window. Every weekday it wrote on appears at
+least twice. A thin or new table keeps the daily window. The gate fails closed.
+
+A missed run is still caught within one day. A Mon-Fri table that skips Friday
+is 98 hours old on Monday. That is past its 96-hour window, so the gate blocks.
 
 `Workspace(warehouse_id=...)` and `Config.fresh_hours` are optional. Without a
 `Workspace`, the gate picks its engine in the same order as `advise` — see
@@ -224,7 +250,8 @@ no setup at all.
 
 #### Options that relax the daily check
 
-`can_refresh` takes three keyword options. Each one changes the 24-hour rule.
+`can_refresh` takes three keyword options. Each one changes how the gate
+decides.
 
 ```python
 from view_scheduler import can_refresh
@@ -232,21 +259,21 @@ from view_scheduler import can_refresh
 result = can_refresh(
     "catalog.schema.my_view",
     ignore_tables=["catalog.schema.audit_log"],   # pass, whatever its history shows
-    ignore_non_daily=True,                        # check a weekly table against its own schedule
+    ignore_non_daily=True,                        # pass a table with no write in history
     check_multi_daily=True,                       # shorten the window for a busy table
 )
 ```
 
 - `ignore_tables=["catalog.schema.table", ...]` — the gate passes those tables
   whatever their history shows. The report says `ignored by caller`.
-- `ignore_non_daily=True` — the gate checks a table that does not refresh every
-  day against its own schedule, not the daily window. A weekly table gets up to
-  7 days (`168h`), and the report says `schedule: Mons`. A table with no refresh
-  in its history passes as a note. A daily table is still checked against the
-  normal window.
+- `ignore_non_daily=True` — the gate passes a table with no write in its
+  history as a note. The cadence check above is the default now, so this option
+  covers only that one case. The report says `static table (no refresh in
+  history) — ignored`.
 - `check_multi_daily=True` — the gate checks a table that runs many times a day
-  against a shorter window. The window becomes `fresh_hours // runs per day`.
-  Three runs a day with `fresh_hours=24` gives an 8-hour window.
+  against a shorter window. The window becomes the earned window divided by the
+  runs per day. Three runs a day for a Mon-Fri table with `fresh_hours=24`
+  gives a 32-hour window: 96 divided by 3.
 
 #### Mark a table in Unity Catalog
 
@@ -262,8 +289,8 @@ Use one of these values: `event_driven`, `event-driven`, `on_demand`,
 
 - `event_driven`, `on_demand`, `static`, and `ignore` — the gate does not block
   on this table. The report says `<mode> table — ignored`.
-- `weekly` — the gate checks the table against a 7-day window, even when
-  `ignore_non_daily` is False.
+- `weekly` — the gate forces the widest gap between run weekdays: seven days.
+  The window is `(7 + 1) * fresh_hours`, or 192 hours at the default.
 
 **Permissions.** The caller needs `SELECT` on each dependency (for
 `DESCRIBE HISTORY`) and `USE` on the catalogs and schemas involved. Materialized

@@ -56,19 +56,51 @@ class Recommendation:
     outlier_days: tuple[date, ...] = ()
 
 
-def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
-    """'daily', 'Mondays', 'Mon,Thu', etc. — observed weekday pattern in words."""
+def _weekday_label(days: Sequence[date], span: Sequence[date],
+                   own: Sequence[date] | None = None) -> str:
+    """'daily', 'Mondays', 'Mon,Thu', etc. — observed weekday pattern in words.
+
+    `days` are the days the table wrote. `span` is the whole read window, so
+    "all seven weekdays" is judged against it. `own` is the table's own span,
+    first write to last write; the coverage test uses it. A table born in the
+    middle of the window still reads "daily" when it wrote every day of its
+    own life. `own` defaults to `span`.
+    """
     if not days:
         return "never"
+    own = span if own is None else own
     seen = sorted({d.weekday() for d in days})
     possible = sorted({d.weekday() for d in span})
-    if set(seen) == set(possible) and len(days) >= len(span) * 0.9:
+    if set(seen) == set(possible) and len(days) >= len(own) * 0.9:
         return "daily"
     if len(seen) == 1:
         return WEEKDAYS[seen[0]] + "s"
-    if len(seen) >= 6:
-        return "daily"
     return ",".join(WEEKDAYS[d] for d in seen)
+
+
+def _own_span(days: Sequence[date]) -> list[date]:
+    """Contiguous range from the first write day to the last write day."""
+    if not days:
+        return []
+    first, last = days[0], days[-1]
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+
+def max_gap_days(seen: frozenset[int]) -> int:
+    """Longest gap between run weekdays, cyclically.
+
+    Mon-Fri -> 3, Mon-Sat -> 2, Mondays-only -> 7, daily -> 1. An empty set
+    has no run day, so the gap is 0; the caller does not extend a "never"
+    cadence.
+    """
+    days = sorted(seen)
+    if not days:
+        return 0
+    if len(days) == 1:
+        return 7
+    gaps = [b - a for a, b in zip(days, days[1:])]
+    gaps.append(days[0] + 7 - days[-1])
+    return max(gaps)
 
 
 def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
@@ -78,7 +110,7 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
     for history in histories:
         days = sorted(history.finish_times)
         times = [history.finish_times[d] for d in days]
-        label = _weekday_label(days, span)
+        label = _weekday_label(days, span, _own_span(days))
         # Only count a miss on days the table would have been expected to run.
         if label == "daily":
             expected = set(span)

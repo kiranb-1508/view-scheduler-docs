@@ -385,7 +385,18 @@ These were verified against a live workspace. They are not opinions.
 9. **`operationMetrics` is a wide JSON column.** The gate classifies commits
    only, so it does not need it. Do not fetch it for the gate.
 
-10. **Classify a commit exactly like this, in this order:**
+10. **A fixed daily window blocks a Mon-Fri table every Monday.** A table that
+    writes Monday to Friday last wrote on Friday. On Monday morning that write
+    is about 74 hours old, so a 24-hour window blocks the view — every Monday,
+    forever. The gate now checks each table against its own observed schedule.
+    The window is one plus the longest gap between run weekdays, times
+    `fresh_hours`: a Mon-Fri table gets 96 hours and a Mondays-only table gets
+    192. The gate extends the window only for a trusted table — at least ten
+    run days, and no weekday seen just once. A thin history keeps the daily
+    window, so a new table cannot relax its own check. A missed run is still
+    caught within one day. Revised 2026-10-16.
+
+11. **Classify a commit exactly like this, in this order:**
 
     | Step | Rule | Class |
     |---|---|---|
@@ -418,8 +429,9 @@ The owner was interviewed in depth. These are settled:
 | Base code | The existing V1 package, not a rewrite |
 | I/O | Reuse the existing `Workspace` seam |
 | Freshness | Rolling hours, not a calendar day |
-| Window default | 24 hours |
-| Window scope | One value per call |
+| Window default | 24 hours for a daily table |
+| Window scope | One `fresh_hours` per call. Each table earns its own window from its observed schedule, under a fail-closed trust guard. (reversed 2026-10-16; was one window for every table) |
+| Cadence checking | On by default. `ignore_non_daily` now covers only a table with no write in history. (reversed 2026-10-16; cadence checking was opt-in) |
 | What qualifies as a write | The V1 rule above, including zero rows |
 | Walk depth | Recurse views, stop at tables and MVs |
 | Streaming | Checked from history (reversed 2026-10-09; was "always fresh") |
