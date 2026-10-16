@@ -1,11 +1,11 @@
 """Phase 3 gate. The anchor is the worked example the design spec states
 outright: safe 06:25, earlier 04:25, buffer 15."""
 
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from view_scheduler.models import TableHistory
-from view_scheduler.recommend import recommend
+from view_scheduler.recommend import _outlier_dates, dependency_rows, recommend
 from tests import fixtures as f
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -208,6 +208,19 @@ def test_a_clean_table_has_no_outliers():
     result = recommend([ORDERS, CUSTOMERS], buffer_min=15)
     assert result.outlier_days == ()
     assert result.safe_without_outliers == result.safe
+
+
+def test_borderline_late_days_are_not_outliers_anywhere():
+    """4 of 12 days run 1h late. MAD would flag the latest day. The one
+    mean-AD rule must not flag it, in the row or in the recommendation."""
+    days = {date(2026, 8, d): datetime(2026, 8, d, 4, 0, tzinfo=UTC)
+            for d in range(1, 13)}
+    for d in (3, 5, 8, 11):
+        days[date(2026, 8, d)] = datetime(2026, 8, d, 5, 0, tzinfo=UTC)
+    rows = dependency_rows([TableHistory("c.s.x", finish_times=days)],
+                           sorted(days))
+    assert rows[0].outlier_day is None
+    assert _outlier_dates(days) == ()
 
 
 def test_a_multi_daily_table_carries_its_slots_and_safe_slots():

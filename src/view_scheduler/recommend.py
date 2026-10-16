@@ -12,8 +12,8 @@ from .models import TableHistory
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-#: The worst day is called an outlier when it sits this far above the table's
-#: usual finish AND beyond this many robust deviations (MAD) of its own spread.
+#: A day is an outlier when it sits this far above the table's median finish
+#: (minutes) AND beyond this many mean absolute deviations of its own spread.
 OUTLIER_FLOOR_MIN = 30
 OUTLIER_MAD_K = 3
 
@@ -91,6 +91,14 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
         # max of the clock times, not of the datetimes: the latest moment of
         # day, which may not be on the latest day.
         worst = max((t.time() for t in times), default=None)
+        outliers = _outlier_dates(history.finish_times)
+        # The one mean-AD rule decides the row too. Name the day of the latest
+        # clock time, but only when that day is in the outlier set.
+        outlier_day = None
+        if outliers:
+            latest = max(history.finish_times.values(), key=lambda v: v.time())
+            if latest.date() in outliers:
+                outlier_day = latest.date()
         safe_slots = tuple(
             (datetime.combine(date(2000, 1, 1), t)
              + timedelta(minutes=buffer_min)).time()
@@ -105,7 +113,7 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
             observed_days=len(days),
             degraded=history.metrics_degraded,
             continuous=history.continuous,
-            outlier_day=_outlier_day(history.finish_times, usual, worst),
+            outlier_day=outlier_day,
             unknown_ops=history.unknown_ops,
             multi_daily=history.multi_daily,
             daily_slots=history.daily_slots,
@@ -121,30 +129,14 @@ def _to_seconds(t) -> int:
     return t.hour * 3600 + t.minute * 60 + t.second
 
 
-def _outlier_day(finish_times: dict, usual: time | None,
-                 worst: time | None) -> date | None:
-    """The date that pins `worst`, if it stands out by MAD from the table's own spread."""
-    if usual is None or worst is None or len(finish_times) < 4:
-        return None
-    seconds = [_to_seconds(v.time()) for v in finish_times.values()]
-    median = statistics.median(seconds)
-    mad = statistics.median([abs(s - median) for s in seconds])
-    worst_s = _to_seconds(worst)
-    usual_s = _to_seconds(usual)
-    if worst_s - usual_s <= OUTLIER_FLOOR_MIN * 60:
-        return None
-    if worst_s - median <= OUTLIER_MAD_K * mad:
-        return None
-    latest = max(finish_times.values(), key=lambda v: v.time())
-    return latest.date()
-
-
 def _outlier_dates(finish_times: dict) -> tuple[date, ...]:
     """All dates in finish_times that stand out above the median.
 
-    The scale is the mean absolute deviation. A small sample whose late days
-    are a large share of the whole lifts that scale, so those days are not
-    called outliers. Only a rare, clearly separated run flags.
+    This is the one outlier rule. The report rows use it, and the
+    recommendation uses it. The scale is the mean absolute deviation. A small
+    sample whose late days are a large share of the whole lifts that scale,
+    so those days are not called outliers. Only a rare, clearly separated run
+    flags.
     """
     if len(finish_times) < 4:
         return ()
