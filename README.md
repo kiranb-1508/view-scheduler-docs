@@ -146,6 +146,24 @@ When there are no outlier days the report keeps the two-line shape:
 `SCHEDULE AT` and `EARLIER` only. `advice.safe_without_outliers` carries the
 `SCHEDULE AT` time, and `advice.usual_time` carries the typical day's finish.
 
+### Which commit counts as the finish
+
+`DESCRIBE HISTORY` gives one moment per commit. It does not say when a job
+started or ended. So the advisor reads the first qualifying commit of each
+local day as the finish.
+
+This rule is right for a rerun. A one-off rerun at 22:00 must not move the
+schedule, and it does not.
+
+The rule is wrong for a job that commits twice per run. Say a job stages at
+04:00 and writes finally at 05:00. The advisor reads 04:00 as the finish,
+because that commit comes first. The table then writes for one more hour.
+
+The advisor cannot tell a rerun from a second write. Raise `--buffer` when a
+job commits twice per run. The bigger buffer covers the later write.
+
+A table that commits twice on a typical day is flagged `multi_daily`.
+
 ### Tables that refresh more than once a day
 
 The advisor counts the runs on a typical day. A table that refreshes two or

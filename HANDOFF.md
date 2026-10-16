@@ -420,6 +420,17 @@ These were verified against a live workspace. They are not opinions.
     - **A zero-row write still counts as a refresh.** A full replace that
       produced no rows still ran. So did a zero-row append.
 
+12. **The first qualifying commit of the day is the finish.**
+    `DESCRIBE HISTORY` gives one moment per commit. It does not say when a job
+    started or ended. So the advisor reads the first qualifying commit of each
+    local day as the finish. This is right for a rerun: a one-off rerun at
+    22:00 must not move the schedule, and it does not. It is wrong for a job
+    that commits twice per run: a 04:00 staging write and a 05:00 final write
+    report a 04:00 finish, though the table wrote for one more hour. The code
+    cannot tell the two cases apart. Raise `--buffer` when a job commits twice
+    per run. A table that commits twice on a typical day is flagged
+    `multi_daily`.
+
 ---
 
 ## 11. Decisions already made — do not relitigate
