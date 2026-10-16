@@ -557,7 +557,8 @@ if you are careless.
 - No CLI subcommand for the gate.
 - No per-view window.
 - No automatic refresh.
-- No concurrency or 429 backoff in the walker (still serial).
+- No concurrency in the walker (still serial). A transient read is retried
+  (reversed 2026-10-16; the walker had no 429 backoff before).
 - No per-table retention windows.
 - No concurrency in the comparison tooling.
 

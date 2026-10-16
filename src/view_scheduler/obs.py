@@ -37,3 +37,20 @@ def call(kind: str, target: str, **extra: Any) -> Iterator[dict]:
     finally:
         record["elapsed_ms"] = round((time.monotonic() - started) * 1000, 1)
         logger.info(json.dumps(record, default=str))
+
+
+def retry(kind: str, target: str, attempt: int, wait_s: float,
+          error: str) -> None:
+    """Log one JSON line for one retry attempt.
+
+    `attempt` is the attempt that failed, counted from one. `wait_s` is the
+    wait before the next attempt. The line carries the same `call` and
+    `target` fields as `call()`.
+    """
+    logger.info(json.dumps({
+        "call": kind,
+        "target": target,
+        "attempt": attempt,
+        "wait_s": wait_s,
+        "error": error,
+    }, default=str))

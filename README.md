@@ -326,6 +326,9 @@ views are read through their pipeline event log, which by default only the
 pipeline's run-as user can read. Without that access the gate **blocks** the MV:
 it reports `history unreadable (permission)`. The call itself does not raise.
 
+A read that fails for a passing reason (rate limit, a passing warehouse error)
+is tried again, twice. A read that fails for a lasting reason blocks at once.
+
 ## Design docs
 
 | File | What it is |
