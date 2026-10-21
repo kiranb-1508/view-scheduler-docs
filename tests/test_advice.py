@@ -97,6 +97,46 @@ def test_unreadable_dependency_is_carried_and_reported():
     assert advice.to_dict()["unreadable"][0]["name"] == "c.s.t2"
 
 
+def test_an_unreadable_dependency_removes_the_headline():
+    # A view with 2 readable tables and 1 table whose DESCRIBE HISTORY
+    # raises a permission error.
+    times = {
+        "c.s.t1": {"2026-08-04": "03:00", "2026-08-05": "03:00",
+                   "2026-08-06": "03:00"},
+        "c.s.t2": {"2026-08-04": "04:00", "2026-08-05": "04:00",
+                   "2026-08-06": "04:00"},
+        "c.s.t3": {"2026-08-04": "04:30", "2026-08-05": "04:30",
+                   "2026-08-06": "04:30"},
+    }
+    ws = workspace(times, errors={"c.s.t3": RuntimeError(
+        "User does not have SELECT on c.s.t3")})
+    advice = advise("c.s.v", ws, CONFIG, today=TODAY, quiet=True)
+    assert advice.safe_time is None
+    assert advice.usual_time is None
+    assert "could not be read" in advice.text
+    assert advice.to_dict()["safe_time"] is None
+    # The readable evidence still prints, but with no marks: no printed time
+    # means no day may be said to set one.
+    assert "2026-08-04" in advice.text
+    assert "WHEN THE LAST JOB FINISHED" in advice.text
+    assert "sets the" not in advice.text
+
+
+def test_a_function_dependency_keeps_the_headline():
+    # A view whose only skip is a UDF note. SCHEDULE AT still prints, and the
+    # note still appears in warnings.
+    tables = {"c.s.v": f.uc_view("c.s.v", ["c.s.t1"], functions=1),
+              "c.s.t1": f.uc_table("c.s.t1")}
+    history = {"c.s.t1": [commit(day, hhmm)
+                          for day, hhmm in BUSY["c.s.t1"].items()]}
+    ws = FakeWorkspace(tables=tables, history=history)
+    advice = advise("c.s.v", ws, CONFIG, today=TODAY, quiet=True)
+    assert advice.safe_time is not None
+    assert "SCHEDULE AT" in advice.text
+    assert "function dependency" in advice.render()
+    assert any("main.default.udf_0" in warning for warning in advice.warnings)
+
+
 def test_advice_is_frozen_and_typed():
     advice = advise("c.s.v", workspace(BUSY), CONFIG, today=TODAY, quiet=True)
     assert isinstance(advice, Advice)
@@ -136,7 +176,8 @@ def test_advice_exposes_the_outlier_aware_times():
     assert advice.safe_without_outliers == time(4, 15)
     assert advice.usual_time == time(4, 15)
     assert set(advice.outlier_days) == {date(2026, 8, 5), date(2026, 8, 9)}
-    assert "WITHOUT OUTLIERS" in advice.render()
+    assert "WITH OUTLIERS  06:25" in advice.render()
+    assert "SCHEDULE AT  04:15    safe on 10 of 12 days" in advice.render()
 
 
 def test_advice_to_dict_carries_the_outlier_fields():
@@ -150,6 +191,18 @@ def test_advice_to_dict_carries_the_outlier_fields():
     assert payload["usual_time"] == "04:15"
     assert payload["outlier_days"] == ["2026-08-05", "2026-08-09"]
     json.dumps(payload)   # must not raise
+
+
+def test_advice_to_dict_keeps_its_keys():
+    """Callers log this dict. A key must not disappear."""
+    payload = advise("c.s.v", workspace(BUSY), CONFIG, today=TODAY,
+                     quiet=True).to_dict()
+    assert set(payload) == {
+        "view", "safe_time", "earlier_time", "next_day",
+        "safe_without_outliers", "usual_time", "outlier_days", "days_used",
+        "period_days", "timezone", "dependencies", "unreadable",
+        "finished_by_day", "warnings",
+    }
 
 
 def test_advice_reports_multi_daily_slots():

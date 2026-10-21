@@ -12,8 +12,8 @@ from .models import TableHistory
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-#: The worst day is called an outlier when it sits this far above the table's
-#: usual finish AND beyond this many robust deviations (MAD) of its own spread.
+#: A day is an outlier when it sits this far above the table's median finish
+#: (minutes) AND beyond this many mean absolute deviations of its own spread.
 OUTLIER_FLOOR_MIN = 30
 OUTLIER_MAD_K = 3
 
@@ -39,7 +39,7 @@ class DependencyRow:
 @dataclass(frozen=True)
 class Recommendation:
     safe: time | None           # worst all-clear + buffer
-    earlier: time | None        # second-worst all-clear + buffer
+    earlier: time | None        # usual time: median of the normal days + buffer
     n_days: int                 # days where every dependency refreshed
     span_days: int = 0          # observed span the `missed` counts are over
     rows: list[DependencyRow] = field(default_factory=list)
@@ -56,19 +56,51 @@ class Recommendation:
     outlier_days: tuple[date, ...] = ()
 
 
-def _weekday_label(days: Sequence[date], span: Sequence[date]) -> str:
-    """'daily', 'Mondays', 'Mon,Thu', etc. — observed weekday pattern in words."""
+def _weekday_label(days: Sequence[date], span: Sequence[date],
+                   own: Sequence[date] | None = None) -> str:
+    """'daily', 'Mondays', 'Mon,Thu', etc. — observed weekday pattern in words.
+
+    `days` are the days the table wrote. `span` is the whole read window, so
+    "all seven weekdays" is judged against it. `own` is the table's own span,
+    first write to last write; the coverage test uses it. A table born in the
+    middle of the window still reads "daily" when it wrote every day of its
+    own life. `own` defaults to `span`.
+    """
     if not days:
         return "never"
+    own = span if own is None else own
     seen = sorted({d.weekday() for d in days})
     possible = sorted({d.weekday() for d in span})
-    if set(seen) == set(possible) and len(days) >= len(span) * 0.9:
+    if set(seen) == set(possible) and len(days) >= len(own) * 0.9:
         return "daily"
     if len(seen) == 1:
         return WEEKDAYS[seen[0]] + "s"
-    if len(seen) >= 6:
-        return "daily"
     return ",".join(WEEKDAYS[d] for d in seen)
+
+
+def _own_span(days: Sequence[date]) -> list[date]:
+    """Contiguous range from the first write day to the last write day."""
+    if not days:
+        return []
+    first, last = days[0], days[-1]
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+
+def max_gap_days(seen: frozenset[int]) -> int:
+    """Longest gap between run weekdays, cyclically.
+
+    Mon-Fri -> 3, Mon-Sat -> 2, Mondays-only -> 7, daily -> 1. An empty set
+    has no run day, so the gap is 0; the caller does not extend a "never"
+    cadence.
+    """
+    days = sorted(seen)
+    if not days:
+        return 0
+    if len(days) == 1:
+        return 7
+    gaps = [b - a for a, b in zip(days, days[1:])]
+    gaps.append(days[0] + 7 - days[-1])
+    return max(gaps)
 
 
 def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
@@ -78,7 +110,7 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
     for history in histories:
         days = sorted(history.finish_times)
         times = [history.finish_times[d] for d in days]
-        label = _weekday_label(days, span)
+        label = _weekday_label(days, span, _own_span(days))
         # Only count a miss on days the table would have been expected to run.
         if label == "daily":
             expected = set(span)
@@ -91,6 +123,14 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
         # max of the clock times, not of the datetimes: the latest moment of
         # day, which may not be on the latest day.
         worst = max((t.time() for t in times), default=None)
+        outliers = _outlier_dates(history.finish_times)
+        # The one mean-AD rule decides the row too. Name the day of the latest
+        # clock time, but only when that day is in the outlier set.
+        outlier_day = None
+        if outliers:
+            latest = max(history.finish_times.values(), key=lambda v: v.time())
+            if latest.date() in outliers:
+                outlier_day = latest.date()
         safe_slots = tuple(
             (datetime.combine(date(2000, 1, 1), t)
              + timedelta(minutes=buffer_min)).time()
@@ -105,7 +145,7 @@ def dependency_rows(histories: Sequence[TableHistory], span: Sequence[date],
             observed_days=len(days),
             degraded=history.metrics_degraded,
             continuous=history.continuous,
-            outlier_day=_outlier_day(history.finish_times, usual, worst),
+            outlier_day=outlier_day,
             unknown_ops=history.unknown_ops,
             multi_daily=history.multi_daily,
             daily_slots=history.daily_slots,
@@ -121,30 +161,14 @@ def _to_seconds(t) -> int:
     return t.hour * 3600 + t.minute * 60 + t.second
 
 
-def _outlier_day(finish_times: dict, usual: time | None,
-                 worst: time | None) -> date | None:
-    """The date that pins `worst`, if it stands out by MAD from the table's own spread."""
-    if usual is None or worst is None or len(finish_times) < 4:
-        return None
-    seconds = [_to_seconds(v.time()) for v in finish_times.values()]
-    median = statistics.median(seconds)
-    mad = statistics.median([abs(s - median) for s in seconds])
-    worst_s = _to_seconds(worst)
-    usual_s = _to_seconds(usual)
-    if worst_s - usual_s <= OUTLIER_FLOOR_MIN * 60:
-        return None
-    if worst_s - median <= OUTLIER_MAD_K * mad:
-        return None
-    latest = max(finish_times.values(), key=lambda v: v.time())
-    return latest.date()
-
-
 def _outlier_dates(finish_times: dict) -> tuple[date, ...]:
     """All dates in finish_times that stand out above the median.
 
-    The scale is the mean absolute deviation. A small sample whose late days
-    are a large share of the whole lifts that scale, so those days are not
-    called outliers. Only a rare, clearly separated run flags.
+    This is the one outlier rule. The report rows use it, and the
+    recommendation uses it. The scale is the mean absolute deviation. A small
+    sample whose late days are a large share of the whole lifts that scale,
+    so those days are not called outliers. Only a rare, clearly separated run
+    flags.
     """
     if len(finish_times) < 4:
         return ()
@@ -209,12 +233,9 @@ def recommend(histories: Sequence[TableHistory], buffer_min: int) -> Recommendat
     usual, usual_next = _add_buffer(
         datetime.combine(ordered_normal[-1].date(), usual_clock), buffer_min)
 
-    if len(outliers) >= 2:
-        earlier, earlier_next = safe_no_out, safe_no_out_next
-    elif len(ordered) >= 2:
-        earlier, earlier_next = _add_buffer(ordered[-2], buffer_min)
-    else:
-        earlier, earlier_next = safe, safe_next
+    # `earlier` is the typical day's finish plus the buffer, in every case.
+    # The outliers are reruns, not the usual pace, so they never move it.
+    earlier, earlier_next = usual, usual_next
     return Recommendation(safe, earlier, len(common), len(span), rows, all_clear,
                           safe_next, earlier_next, safe_no_out, safe_no_out_next,
                           usual, usual_next, outliers)

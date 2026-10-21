@@ -1,11 +1,17 @@
 """Phase 3 gate. The anchor is the worked example the design spec states
-outright: safe 06:25, earlier 05:45, buffer 15."""
+outright: safe 06:25, earlier 04:25, buffer 15."""
 
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from view_scheduler.models import TableHistory
-from view_scheduler.recommend import recommend
+from view_scheduler.recommend import (
+    _outlier_dates,
+    _weekday_label,
+    dependency_rows,
+    max_gap_days,
+    recommend,
+)
 from tests import fixtures as f
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -34,7 +40,7 @@ def test_the_worked_example_from_the_design_spec():
     assert [t.strftime("%H:%M") for t in ordered] == \
         ["04:00", "04:00", "04:10", "05:30", "06:10"]
     assert result.safe == time(6, 25)
-    assert result.earlier == time(5, 45)
+    assert result.earlier == time(4, 25)
     assert result.n_days == 5
 
 
@@ -81,6 +87,36 @@ def test_a_weekly_dependency_is_labelled_not_marked_as_missing():
     row = next(r for r in result.rows if r.name == "products")
     assert row.refreshes == "Mons"
     assert row.missed == 0, "a weekly table has not missed the days it never runs"
+
+
+# --- the weekday label --------------------------------------------------------
+
+def test_mon_to_sat_is_not_daily():
+    """Six of seven weekdays must not read as "daily".
+
+    The old `len(seen) >= 6` fallback hid a Mon-Sat table. Its real schedule
+    is the six weekdays it runs on.
+    """
+    span = [date(2026, 8, 1) + timedelta(days=i) for i in range(30)]
+    days = [d for d in span if d.weekday() != 6]      # every day but Sunday
+    assert _weekday_label(days, span, days) == "Mon,Tue,Wed,Thu,Fri,Sat"
+
+
+def test_a_table_created_mid_window_is_still_daily():
+    """A table born on day 10 of the window wrote every day of its own life,
+    so it reads "daily". The coverage test uses the table's own span, not the
+    whole window.
+    """
+    span = [date(2026, 8, 1) + timedelta(days=i) for i in range(30)]
+    own = span[10:]
+    assert _weekday_label(list(own), span, own) == "daily"
+
+
+def test_gap_days_computes_the_cyclic_gap():
+    assert max_gap_days(frozenset({0, 1, 2, 3, 4})) == 3      # Fri -> Mon
+    assert max_gap_days(frozenset({0})) == 7                   # Mondays only
+    assert max_gap_days(frozenset({0, 1, 2, 3, 4, 5})) == 2    # Sat -> Mon
+    assert max_gap_days(frozenset(range(7))) == 1             # every day
 
 
 def test_no_overlapping_days_yields_no_recommendation_rather_than_a_wrong_one():
@@ -159,16 +195,68 @@ def test_outliers_are_named_and_set_safe_apart_from_the_typical_time():
 
 
 def test_two_outlier_days_move_earlier_to_the_typical_time():
-    """Without this, ordered[-2] would be the other late day (06:25)."""
+    """The two late days are reruns, so they do not move `earlier`. It stays the
+    typical day plus the buffer, 04:15, well before the 06:25 worst case.
+    """
     result = recommend([outlier_history("c.s.x")], buffer_min=15)
     assert result.earlier == time(4, 15)
     assert result.earlier != result.safe
+
+
+LOAD_DELAY_DAYS = [date(2026, 8, d) for d in range(1, 16)]
+
+
+def test_earlier_ignores_load_delays_when_outliers_exist():
+    """15 days: 11 at 04:00, 2 slow-load days at 04:20, 2 rerun days at 06:10.
+
+    The slow-load days are 20 minutes late. They are NOT outliers. With the
+    buffer the numbers are safe 06:25, safe_without_outliers 04:35, usual
+    04:15. `earlier` must be the typical time 04:15, not the worst non-outlier
+    day 04:35.
+    """
+    slow = {date(2026, 8, 6), date(2026, 8, 12)}
+    late = {date(2026, 8, 5), date(2026, 8, 9)}
+    finish = {
+        d: f.at(d.isoformat(),
+                "06:10" if d in late else "04:20" if d in slow else "04:00")
+        for d in LOAD_DELAY_DAYS
+    }
+    result = recommend([TableHistory("c.s.x", finish)], buffer_min=15)
+    assert set(result.outlier_days) == late, "a 20-minute load delay is not an outlier"
+    assert result.safe == time(6, 25)
+    assert result.safe_without_outliers == time(4, 35)
+    assert result.usual == time(4, 15)
+    assert result.earlier == time(4, 15)
+
+
+def test_the_recommendation_field_names_are_stable():
+    """The public shape of the result. New fields may be added; none may go."""
+    from dataclasses import fields
+    from view_scheduler.recommend import Recommendation
+    names = [f.name for f in fields(Recommendation)]
+    for name in ("safe", "safe_without_outliers", "usual", "earlier",
+                 "outlier_days", "safe_next_day", "earlier_next_day",
+                 "safe_without_outliers_next_day", "usual_next_day"):
+        assert name in names
 
 
 def test_a_clean_table_has_no_outliers():
     result = recommend([ORDERS, CUSTOMERS], buffer_min=15)
     assert result.outlier_days == ()
     assert result.safe_without_outliers == result.safe
+
+
+def test_borderline_late_days_are_not_outliers_anywhere():
+    """4 of 12 days run 1h late. MAD would flag the latest day. The one
+    mean-AD rule must not flag it, in the row or in the recommendation."""
+    days = {date(2026, 8, d): datetime(2026, 8, d, 4, 0, tzinfo=UTC)
+            for d in range(1, 13)}
+    for d in (3, 5, 8, 11):
+        days[date(2026, 8, d)] = datetime(2026, 8, d, 5, 0, tzinfo=UTC)
+    rows = dependency_rows([TableHistory("c.s.x", finish_times=days)],
+                           sorted(days))
+    assert rows[0].outlier_day is None
+    assert _outlier_dates(days) == ()
 
 
 def test_a_multi_daily_table_carries_its_slots_and_safe_slots():

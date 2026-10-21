@@ -10,15 +10,23 @@ tables it reads and checks that every one of them wrote recently.
 READ ONLY, and DECIDE ONLY. The gate never refreshes anything. It answers one
 question, and the calling job acts on the answer.
 
-A dependency is fresh when it has a qualifying write within the last
-`Config.fresh_hours` hours (default 24). A streaming table is checked like
-any table: it is a Delta table, its history is readable, and one on a
-schedule is stale between runs. A materialized view is read from its pipeline
-event log. Anything we cannot read blocks the view, because the gate fails
-closed.
+A dependency is fresh when it has a qualifying write inside its window. A
+daily table gets `Config.fresh_hours` hours (default 24). A table that writes
+on a weekly-ish schedule gets a wider window: `(longest gap between its run
+weekdays + 1) * fresh_hours`. A Mon-Fri table gets 96 hours and a Mondays-only
+table gets 192. A streaming table is checked like any table: it is a Delta
+table, its history is readable, and one on a schedule is stale between runs. A
+materialized view is read from its pipeline event log. Anything we cannot read
+blocks the view, because the gate fails closed.
+
+The cadence window applies only when the history is trusted: every weekday the
+table wrote on appears at least twice, and the table does not run on all seven
+weekdays. A table seen on all seven weekdays is a daily table with outages, so
+it keeps the daily window. A thin history keeps the daily window too. That is
+the fail-closed guard.
 
 The call can relax the daily check. `ignore_tables` names tables to skip.
-`ignore_non_daily` checks a weekly or static table against its own schedule.
+`ignore_non_daily` passes a table with no write in history as a note.
 `check_multi_daily` shortens the window for a table that runs many times a
 day. A `view_scheduler.mode` table property can mark one table as static or
 event driven.
@@ -35,15 +43,16 @@ event driven.
 from __future__ import annotations
 
 import statistics
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
 from .client import Workspace, failure_category, read_commits
 from .config import DEFAULT, Config
 from .history import finish_times, qualifying, qualifying_per_day
-from .recommend import _weekday_label
+from .recommend import _own_span, _weekday_label, max_gap_days
 from .walker import walk
 
 #: Values of the `view_scheduler.mode` table property that mean "do not gate on
@@ -51,6 +60,25 @@ from .walker import walk
 IGNORED_MODES = {
     "event_driven", "event-driven", "on_demand", "on-demand", "static", "ignore",
 }
+
+
+@dataclass(frozen=True)
+class ReadSummary:
+    """What one history read tells the gate about a dependency.
+
+    `cadence` is the observed schedule in words: "daily", "never", or a
+    weekday list such as "Mons" or "Mon,Tue,Wed,Thu,Fri". `seen_weekdays` and
+    `every_weekday_twice` feed the trust guard: every weekday the table wrote
+    on must appear at least twice, and the table must not run on all seven
+    weekdays. `every_weekday_twice` is that twice test.
+    """
+
+    latest: datetime | None
+    cadence: str
+    seen_weekdays: frozenset[int]
+    every_weekday_twice: bool
+    multi_daily: bool
+    median_runs: int
 
 
 @dataclass(frozen=True)
@@ -180,18 +208,23 @@ def can_refresh(
     to make a test reproducible. `quiet=True` suppresses the printed report; the
     result is returned either way.
 
-    Three options relax the default daily check:
+    A table is checked against its own observed schedule by default. A daily
+    table keeps the `fresh_hours` window. A trusted weekly-ish table gets a
+    wider window, up to `(7 + 1) * fresh_hours` for a table that runs one day a
+    week. A thin history keeps the daily window.
+
+    Three options relax the default check further:
 
     `ignore_tables` names tables the caller does not want to gate on. A table in
     this list passes, whatever its history shows.
 
-    `ignore_non_daily` passes a table that does not refresh every day. The gate
-    checks it against its own schedule, up to a 168-hour window, and passes a
-    table with no refresh in history as a note.
+    `ignore_non_daily` passes a table with no refresh in history as a note. The
+    cadence check above is the default now, so this option covers only that one
+    case.
 
     `check_multi_daily` shortens the window for a table that runs many times a
-    day. The window becomes `fresh_hours // (runs per day)`, so a table with
-    three runs a day must have written within a third of the window.
+    day. The window becomes `earned_window // (runs per day)`, so a table with
+    three runs a day must have written within a third of its window.
     """
     names = [views] if isinstance(views, str) else [str(name) for name in views]
     if not names:
@@ -214,7 +247,7 @@ def can_refresh(
     # Shared across the whole call: a table two views depend on is read once,
     # and a failure is remembered rather than retried for every view.
     meta_cache: dict[str, dict | Exception] = {}
-    hist_cache: dict[str, tuple[datetime | None, str, bool, int] | Exception] = {}
+    hist_cache: dict[str, ReadSummary | Exception] = {}
 
     def fetch_meta(name: str) -> dict:
         if name not in meta_cache:
@@ -273,16 +306,25 @@ def can_refresh(
 
 
 def _history_summary(workspace: Workspace, name: str, moment: datetime,
-                     settings: Config, not_after: int
-                     ) -> tuple[datetime | None, str, bool, int]:
-    """(newest qualifying write, cadence label, multi-daily, runs per day).
+                     settings: Config, not_after: int) -> ReadSummary:
+    """One ReadSummary for a dependency.
 
     `latest` ignores a write dated after `not_after`, so a clock-skewed future
     commit cannot make a stale table look fresh. The cadence label comes from
     the weekdays the table wrote on in the window. `multi_daily` is True when
     the median active day held two or more qualifying commits.
+
+    The read is bounded in SQL to the start of the local day `days_history`
+    days before `moment`, exactly as `run.collect_history` computes it. The
+    cadence is computed over that many days, so the gate never needs older
+    commits, and the warehouse returns a small window instead of the whole
+    history of a long-lived table.
     """
-    commits = read_commits(workspace, name, with_metrics=False)
+    cutoff_day = moment.date() - timedelta(days=settings.days_history)
+    since_epoch = int(datetime.combine(cutoff_day, time.min,
+                                       tzinfo=settings.tz).timestamp())
+    commits = read_commits(workspace, name, with_metrics=False,
+                           since_epoch=since_epoch)
     latest: datetime | None = None
     for commit in commits:
         if not qualifying(commit):
@@ -296,11 +338,19 @@ def _history_summary(workspace: Workspace, name: str, moment: datetime,
                                settings.days_history, settings.tz))
     span = [moment.date() - timedelta(days=i)
             for i in range(settings.days_history - 1, -1, -1)]
-    cadence = _weekday_label(days, span)
+    cadence = _weekday_label(days, span, _own_span(days))
     per_day = qualifying_per_day(commits, moment.date(),
                                  settings.days_history, settings.tz)
     median_runs = int(statistics.median(per_day.values())) if per_day else 0
-    return latest, cadence, median_runs >= 2, median_runs
+    counts = Counter(day.weekday() for day in days)
+    return ReadSummary(
+        latest=latest,
+        cadence=cadence,
+        seen_weekdays=frozenset(counts),
+        every_weekday_twice=bool(counts) and all(n >= 2 for n in counts.values()),
+        multi_daily=median_runs >= 2,
+        median_runs=median_runs,
+    )
 
 
 def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, *,
@@ -308,11 +358,17 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
                  check_multi_daily: bool) -> Dependency:
     """Turn one dependency's history into a fresh/stale verdict.
 
-    The default check is one rule: a qualifying write within `window` hours.
-    The options relax it. The caller can ignore a table by name. A table can
-    mark itself with a `view_scheduler.mode` property. A weekly or static table
-    is checked against its real schedule. A table that runs many times a day is
-    checked against a shorter window.
+    The window depends on the table's own observed schedule. A daily table
+    keeps `window` hours. A table on a trusted weekly-ish schedule gets
+    `(max_gap_days + 1) * window`, so a Mon-Fri table gets 96 hours and a
+    Mondays-only table gets 192. The trust guard fails closed: a weekday seen
+    only once, or all seven weekdays seen, keeps the strict daily window.
+
+    A `view_scheduler.mode` of "weekly" forces the seven-day gap, whatever the
+    observed cadence. A table that runs many times a day divides the window by
+    its median runs, when `check_multi_daily` is set. The caller can ignore a
+    table by name. `ignore_non_daily` covers only a table with no write in
+    history: it passes as a note.
 
     A streaming table goes through the same check as a managed table. A
     streaming table on a schedule commits once per run, so between runs it is
@@ -325,7 +381,10 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
     if isinstance(history, Exception):
         return Dependency(ref.name, ref.kind, False,
                           detail=f"history unreadable ({failure_category(history)})")
-    latest, cadence, multi_daily, median_runs = history
+    latest = history.latest
+    cadence = history.cadence
+    multi_daily = history.multi_daily
+    median_runs = history.median_runs
     minutes = (None if latest is None
                else max(0, int((moment - latest).total_seconds() // 60)))
 
@@ -349,9 +408,30 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
                           detail="no qualifying refresh in history",
                           cadence=cadence, multi_daily=multi_daily)
 
-    # A table that runs many times a day needs a shorter window.
+    # The window this table earns from its own schedule. "weekly" mode forces
+    # the seven-day gap. A trusted weekly-ish cadence widens the window by the
+    # longest cyclic gap between run weekdays. Anything else stays daily.
+    #
+    # A table seen on all seven weekdays is a daily table with outages, so it
+    # keeps the daily window whatever its coverage. The trust guard fails
+    # closed: every weekday the table wrote on must appear at least twice.
+    weekly_mode = mode == "weekly"
+    if weekly_mode:
+        on_schedule = True
+        earned = (7 + 1) * window
+    elif cadence == "daily":
+        on_schedule = False
+        earned = window
+    elif len(history.seen_weekdays) < 7 and history.every_weekday_twice:
+        on_schedule = True
+        earned = (max_gap_days(history.seen_weekdays) + 1) * window
+    else:
+        on_schedule = False
+        earned = window
+
+    # A table that runs many times a day divides the earned window.
     if check_multi_daily and multi_daily:
-        eff_window = max(1, window // median_runs)
+        eff_window = max(1, earned // median_runs)
         fresh = latest >= moment - timedelta(hours=eff_window)
         detail = ("" if fresh
                   else f"multi-daily ({median_runs}x/day) — older than the "
@@ -359,23 +439,15 @@ def _verdict_for(ref, history, cutoff: datetime, moment: datetime, window: int, 
         return Dependency(ref.name, ref.kind, fresh, latest, minutes,
                           detail=detail, cadence=cadence, multi_daily=True)
 
-    # A weekly or static table is checked against its own schedule.
-    if ignore_non_daily or mode == "weekly":
-        if cadence == "never":
-            return Dependency(ref.name, ref.kind, True, latest, minutes,
-                              detail="static table — ignored", cadence=cadence,
-                              multi_daily=multi_daily)
-        if cadence != "daily" or mode == "weekly":
-            weekly_cutoff = moment - timedelta(hours=168)
-            label = cadence if cadence not in ("daily", "never") else "weekly"
-            if latest >= weekly_cutoff:
-                return Dependency(ref.name, ref.kind, True, latest, minutes,
-                                  detail=f"schedule: {label}", cadence=cadence,
-                                  multi_daily=multi_daily)
-            return Dependency(
-                ref.name, ref.kind, False, latest, minutes,
-                detail=f"schedule: {label} — older than the 168h window",
-                cadence=cadence, multi_daily=multi_daily)
+    # A table on a trusted schedule is checked against its own window.
+    if on_schedule:
+        label = cadence if cadence not in ("daily", "never") else "weekly"
+        fresh = latest >= moment - timedelta(hours=earned)
+        detail = (f"schedule: {label} — window {earned}h" if fresh
+                  else f"schedule: {label} — older than the {earned}h window")
+        return Dependency(ref.name, ref.kind, fresh, latest, minutes,
+                          detail=detail, cadence=cadence,
+                          multi_daily=multi_daily)
 
     # The default daily check.
     fresh = latest >= cutoff

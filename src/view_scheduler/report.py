@@ -45,18 +45,26 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
     lines.append("")
 
     if result.safe:
-        lines.append(
-            f"       SCHEDULE AT  {_hhmm(result.safe)}"
-            f"{_day_mark(result.safe_next_day)}"
-            f"    safe — every job had finished, on all "
-            f"{_plural(result.n_days, 'day')}")
-        if (result.outlier_days and result.safe_without_outliers is not None
-                and result.safe_without_outliers != result.safe):
+        if result.outlier_days and result.safe_without_outliers is not None:
+            # Outliers are reruns. The headline time is the one the normal days
+            # need. The next line covers every day.
+            normal_days = result.n_days - len(result.outlier_days)
             lines.append(
-                f"       WITHOUT OUTLIERS  {_hhmm(result.safe_without_outliers)}"
+                f"       SCHEDULE AT  {_hhmm(result.safe_without_outliers)}"
                 f"{_day_mark(result.safe_without_outliers_next_day)}"
-                f"    excludes {_plural(len(result.outlier_days), 'outlier day')}"
+                f"    safe on {normal_days} of {_plural(result.n_days, 'day')}"
+                f" — excludes {_plural(len(result.outlier_days), 'outlier day')}"
             )
+            lines.append(
+                f"       WITH OUTLIERS  {_hhmm(result.safe)}"
+                f"{_day_mark(result.safe_next_day)}"
+                f"    safe on all {_plural(result.n_days, 'day')}")
+        else:
+            lines.append(
+                f"       SCHEDULE AT  {_hhmm(result.safe)}"
+                f"{_day_mark(result.safe_next_day)}"
+                f"    safe — every job had finished, on all "
+                f"{_plural(result.n_days, 'day')}")
         if result.earlier and result.earlier != result.safe:
             early = _too_early(result)
             note = (f"one job had not finished yet, on {early} of "
@@ -65,9 +73,19 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
             lines.append(f"       EARLIER      {_hhmm(result.earlier)}"
                          f"{_day_mark(result.earlier_next_day)}    {note}")
     else:
-        lines.append("       NO TIME TO SUGGEST — there is no day where every "
-                     "job had finished.")
-        lines.append("       The table below shows which jobs did not run.")
+        blocking = [item for item in skipped if item.blocks]
+        if blocking:
+            lines.append(
+                f"       NO TIME TO SUGGEST — "
+                f"{_plural(len(blocking), 'dependency')} could not be read.")
+            verb = "was" if len(result.rows) == 1 else "were"
+            lines.append(
+                f"       The times below cover only the "
+                f"{_plural(len(result.rows), 'dependency')} that {verb} read.")
+        else:
+            lines.append("       NO TIME TO SUGGEST — there is no day where every "
+                         "job had finished.")
+            lines.append("       The table below shows which jobs did not run.")
     lines.append("")
 
     if result.rows:
@@ -93,19 +111,37 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
 
 
 def all_clear_series(result: Recommendation) -> list[str]:
-    """Which day set each of the two times. This is the evidence."""
+    """Which day set each printed time. This is the evidence.
+
+    Only two marks exist. Each one sits on the day that produces the number
+    beside it. SCHEDULE AT comes from the latest normal day. WITH OUTLIERS
+    comes from the latest day of all, and prints only when outliers exist.
+    `earlier` is a median over the window, so no single day sets it.
+
+    A mark names a time the report prints. When the headline is suppressed
+    (`safe` is None) no time is printed, so no mark prints either: it would
+    name a time the report does not contain. The rows stay — they are the
+    readable evidence.
+    """
     if not result.all_clear:
         return []
     ordered = sorted(result.all_clear.items(), key=lambda kv: kv[1].time(),
                      reverse=True)
+    outliers = set(result.outlier_days)
+    marks: dict = {}
+    if result.safe:
+        # SCHEDULE AT is the latest normal day (the latest day of all when
+        # there are no outliers). WITH OUTLIERS is the latest day of all.
+        schedule_day = next((day for day, _ in ordered if day not in outliers),
+                            ordered[0][0])
+        worst_day = ordered[0][0]
+        marks.setdefault(schedule_day, []).append("SCHEDULE AT")
+        if outliers:
+            marks.setdefault(worst_day, []).append("WITH OUTLIERS")
     out = ["WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)"]
-    for i, (day, moment) in enumerate(ordered):
-        if i == 0:
-            mark = "   ← sets the safe time"
-        elif i == 1:
-            mark = "   ← sets the earlier time"
-        else:
-            mark = ""
+    for day, moment in ordered:
+        mark = "".join(f"   ← sets the {label} time"
+                       for label in marks.get(day, []))
         out.append(f"  {day.isoformat()}  {WEEKDAYS[day.weekday()]}  "
                    f"{moment.strftime('%H:%M')}{mark}")
     return out
@@ -122,10 +158,19 @@ def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
             out.append(f"!  {row.name} did not run on {row.missed} of "
                        f"{result.span_days} days — no schedule time fixes that")
         if row.outlier_day:
+            # A median has no single day behind it. The late day sets the WITH
+            # OUTLIERS time, which is not the same as SCHEDULE AT.
+            if len(result.outlier_days) >= 2:
+                subject = (f"those {_plural(len(result.outlier_days), 'outlier day')}"
+                           f" set")
+                pronoun = "them"
+            else:
+                subject = "that one day sets"
+                pronoun = "it"
             out.append(f"!  {row.name} finished very late on "
                        f"{row.outlier_day.isoformat()} ({_hhmm(row.worst)}, "
-                       f"usually {_hhmm(row.usual)}) — that one day sets the "
-                       f"safe time. Without it you could use "
+                       f"usually {_hhmm(row.usual)}) — {subject} the WITH "
+                       f"OUTLIERS time. Without {pronoun} you could use "
                        f"{_hhmm(result.earlier)}.")
         if row.continuous:
             out.append(f"!  {row.name} runs many times a day — the time above "
@@ -158,10 +203,19 @@ def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
                    f"yesterday's data.")
 
     if skipped:
-        word = "dependency" if len(skipped) == 1 else "dependencies"
-        out.append(f"!  {len(skipped)} {word} could not be read:")
-        for item in skipped:
-            out.append(f"     {item.name} — {item.reason}")
+        blocking = [item for item in skipped if item.blocks]
+        notes = [item for item in skipped if not item.blocks]
+        if blocking:
+            out.append(f"!  {_plural(len(blocking), 'dependency')} "
+                       f"could not be read:")
+            for item in blocking:
+                out.append(f"     {item.name} — {item.reason}")
+        if notes:
+            verb = "needs" if len(notes) == 1 else "need"
+            out.append(f"!  {_plural(len(notes), 'dependency')} {verb} "
+                       f"no refresh:")
+            for item in notes:
+                out.append(f"     {item.name} — {item.reason}")
 
     if result.n_days and result.n_days < 10:
         starved = min((r for r in result.rows), key=lambda r: r.observed_days,

@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the View Scheduler works — interactive guide</title>
+<style>
+:root{
+  --paper:#F4F6F8; --surface:#FFFFFF; --surface-sunk:#E9EDF1;
+  --ink:#12202E; --ink-soft:#3D4E5C; --ink-mute:#697A88;
+  --rule:#CFD8DF; --rule-soft:#E1E7EC;
+  --accent:#1E6F8C; --accent-soft:#DCEAF0;
+  --warn:#A87A16; --warn-soft:#F5EBD6;
+  --crit:#B3324A; --crit-soft:#F7DFE4;
+  --good:#2F6B4F; --good-soft:#DEEDE4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+    --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+    --rule:#2A3841; --rule-soft:#1E2A32;
+    --accent:#59AEC9; --accent-soft:#12303C;
+    --warn:#D6A94A; --warn-soft:#33280F;
+    --crit:#E2788B; --crit-soft:#3A1A22;
+    --good:#6FBE95; --good-soft:#12301F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1519; --surface:#151E24; --surface-sunk:#0A1014;
+  --ink:#DCE5EA; --ink-soft:#A9B9C4; --ink-mute:#7E8F9B;
+  --rule:#2A3841; --rule-soft:#1E2A32;
+  --accent:#59AEC9; --accent-soft:#12303C;
+  --warn:#D6A94A; --warn-soft:#33280F;
+  --crit:#E2788B; --crit-soft:#3A1A22;
+  --good:#6FBE95; --good-soft:#12301F;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:Georgia,"Times New Roman",serif;font-size:17px;line-height:1.6}
+.wrap{max-width:1120px;margin:0 auto;padding:0 26px 90px}
+header.mast{border-bottom:2px solid var(--ink);padding:54px 0 24px}
+.eyebrow{font-family:"Courier New",monospace;font-size:11px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-family:Arial,Helvetica,sans-serif;font-weight:700;
+  font-size:clamp(2rem,5.2vw,3rem);line-height:1.05;letter-spacing:-.025em;margin:0 0 14px}
+h2{font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:1.5rem;
+  letter-spacing:-.015em;margin:56px 0 10px;text-wrap:balance}
+h3{font-family:Arial,Helvetica,sans-serif;font-weight:600;font-size:1.04rem;margin:26px 0 7px}
+p{margin:0 0 14px}
+.lead{max-width:72ch;color:var(--ink-soft);font-size:1.12rem;margin:0}
+code,pre{font-family:"Courier New",monospace}
+code{background:var(--surface-sunk);padding:1px 5px;border-radius:2px;font-size:.86em}
+pre{background:var(--surface-sunk);border:1px solid var(--rule);padding:16px 18px;
+  margin:16px 0 20px;font-size:12.8px;line-height:1.5;overflow-x:auto}
+pre code{background:transparent;padding:0;font-size:inherit}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:15px 19px;margin:20px 0}
+.note.good{border-left-color:var(--good);background:var(--good-soft)}
+.note.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.note.crit{border-left-color:var(--crit);background:var(--crit-soft)}
+.note p:last-child{margin-bottom:0}
+.note .tag{font-family:"Courier New",monospace;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;display:block;margin-bottom:6px;color:var(--accent)}
+.note.good .tag{color:var(--good)} .note.warn .tag{color:var(--warn)} .note.crit .tag{color:var(--crit)}
+nav.toc{position:sticky;top:0;z-index:20;background:var(--paper);
+  border-bottom:1px solid var(--rule);padding:10px 0;display:flex;gap:8px;flex-wrap:wrap}
+nav.toc button{font-family:"Courier New",monospace;font-size:11.5px;letter-spacing:.04em;
+  background:var(--surface);border:1px solid var(--rule);color:var(--ink-soft);
+  padding:6px 11px;cursor:pointer;border-radius:2px}
+nav.toc button:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc .spacer{flex:1}
+nav.toc #theme{color:var(--accent);border-color:var(--accent)}
+.grid{display:grid;gap:14px}
+.grid.c2{grid-template-columns:repeat(2,1fr)}
+.grid.c3{grid-template-columns:repeat(3,1fr)}
+.card{border:1px solid var(--rule);background:var(--surface);padding:16px 18px}
+.card h3{margin-top:0}
+.card p:last-child{margin-bottom:0}
+.card.q{border-top:3px solid var(--accent)}
+.card.a{border-top:3px solid var(--good)}
+.card.w{border-top:3px solid var(--warn)}
+.tagp{display:inline-block;font-family:"Courier New",monospace;font-size:10.5px;
+  letter-spacing:.1em;text-transform:uppercase;padding:2px 8px;border-radius:999px;margin:0 0 10px}
+.tagp.acc{background:var(--accent-soft);color:var(--accent)}
+.tagp.good{background:var(--good-soft);color:var(--good)}
+.tagp.warn{background:var(--warn-soft);color:var(--warn)}
+.tagp.crit{background:var(--crit-soft);color:var(--crit)}
+table{border-collapse:collapse;width:100%;background:var(--surface);font-size:14px}
+th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--rule-soft);padding:10px 13px}
+thead th{font-family:Arial,sans-serif;font-weight:600;font-size:11px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-mute);background:var(--surface-sunk);
+  border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto;border:1px solid var(--rule);margin:18px 0 22px}
+/* stepper */
+.stepper{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 8px}
+.stepper button{font-family:"Courier New",monospace;font-size:11.5px;background:var(--surface);
+  border:1px solid var(--rule);padding:7px 11px;cursor:pointer;color:var(--ink-soft)}
+.stepper button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.step-panel{display:none;border:1px solid var(--rule);background:var(--surface);padding:18px 20px;margin-bottom:18px}
+.step-panel.on{display:block}
+.step-panel h3{margin-top:0}
+.step-panel .where{font-family:"Courier New",monospace;font-size:11.5px;color:var(--ink-mute);
+  letter-spacing:.05em;display:block;margin-top:10px}
+/* decision ladder */
+.ladder{background:var(--surface);border:1px solid var(--rule);padding:20px 22px;margin:20px 0}
+.lrow{display:flex;align-items:flex-start;gap:14px;padding:11px 0;border-bottom:1px dashed var(--rule-soft)}
+.lrow:last-child{border-bottom:0}
+.lq{font-family:"Courier New",monospace;font-size:12.5px;color:var(--ink-soft);width:520px;flex-shrink:0}
+.lq b{color:var(--ink)}
+.pill{font-family:"Courier New",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 10px;border-radius:999px;white-space:nowrap;font-weight:700}
+.pill.fresh{background:var(--good-soft);color:var(--good)}
+.pill.stale{background:var(--crit-soft);color:var(--crit)}
+.pill.block{background:var(--crit-soft);color:var(--crit)}
+.pill.note{background:var(--accent-soft);color:var(--accent)}
+/* simulator */
+.sim{display:grid;grid-template-columns:340px 1fr;gap:18px;margin:20px 0}
+@media (max-width:860px){.sim{grid-template-columns:1fr}}
+.sim-controls{background:var(--surface);border:1px solid var(--rule);padding:16px 18px}
+.sim-controls h3{margin-top:0}
+.sim-row{margin:0 0 12px}
+.sim-row label{display:block;font-family:"Courier New",monospace;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-mute);margin-bottom:4px}
+.sim-row select{width:100%;padding:6px 8px;border:1px solid var(--rule);background:var(--paper);
+  color:var(--ink);font-family:"Courier New",monospace;font-size:12.5px}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 16px}
+.presets button{font-family:"Courier New",monospace;font-size:11px;background:var(--paper);
+  border:1px solid var(--rule);padding:5px 9px;cursor:pointer;color:var(--ink-soft)}
+.presets button:hover{border-color:var(--accent);color:var(--accent)}
+.sim-out{background:var(--surface);border:1px solid var(--rule);padding:0;display:flex;flex-direction:column}
+.sim-out .bar{padding:10px 18px;border-bottom:1px solid var(--rule);display:flex;gap:10px;align-items:center}
+#verdict{font-family:"Courier New",monospace;font-weight:700;font-size:13px;letter-spacing:.06em}
+#verdict.ready{color:var(--good)} #verdict.blocked{color:var(--crit)}
+#simReport{margin:0;border:0;flex:1;min-height:280px}
+#simBanner{display:none;margin:0;border-left:0;border-right:0}
+/* case study timeline */
+.tl{background:var(--surface);border:1px solid var(--rule);padding:18px;margin:20px 0}
+/* findings */
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
+.filters button{font-family:"Courier New",monospace;font-size:11px;background:var(--surface);
+  border:1px solid var(--rule);padding:5px 10px;cursor:pointer;color:var(--ink-soft)}
+.filters button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+tr.hidden{display:none}
+.chip{font-family:"Courier New",monospace;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;white-space:nowrap;font-weight:700}
+.chip.readnor{background:var(--crit-soft);color:var(--crit)}
+.chip.advice{background:var(--warn-soft);color:var(--warn)}
+.chip.block{background:var(--accent-soft);color:var(--accent)}
+.chip.crash{background:var(--surface-sunk);color:var(--ink-soft);border:1px solid var(--rule)}
+.chip.test{background:var(--good-soft);color:var(--good)}
+.chip.decide{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn)}
+/* case study columns */
+.case{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
+@media (max-width:860px){.case{grid-template-columns:1fr}}
+.case .card p{margin-bottom:8px}
+details{border:1px solid var(--rule);background:var(--surface);margin:0 0 10px}
+details summary{cursor:pointer;padding:13px 17px;font-family:Arial,sans-serif;font-weight:600;
+  font-size:14.5px;list-style:none;display:flex;gap:10px;align-items:baseline}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"▸";color:var(--accent);font-family:"Courier New",monospace}
+details[open] summary::before{content:"▾"}
+details .body{padding:2px 20px 16px;border-top:1px solid var(--rule-soft)}
+details .body p:first-child{margin-top:12px}
+.dnum{font-family:"Courier New",monospace;font-size:11px;color:var(--ink-mute);
+  letter-spacing:.06em;min-width:52px}
+footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
+  font-family:"Courier New",monospace;font-size:11.5px;color:var(--ink-mute);letter-spacing:.04em}
+@media (max-width:720px){
+  .grid.c2,.grid.c3{grid-template-columns:1fr}
+  .lq{width:auto}
+  .lrow{flex-direction:column;gap:6px}
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Interactive guide · version 0.7.0 · read this before approving changes</p>
+  <h1>How the View Scheduler works</h1>
+  <p class="lead">One job refreshes a view on a schedule. An upstream table may not have refreshed yet.
+  The refresh still runs and publishes stale data. Nothing errors. Nobody is told.
+  This guide shows how the tool makes that failure loud, step by step. It marks every important design decision.
+  It ends with the open findings that wait for your approval.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <button data-go="s-problem">The problem</button>
+  <button data-go="s-journey">Follow one view</button>
+  <button data-go="s-gate">The gate rules</button>
+  <button data-go="s-sim">Try the gate</button>
+  <button data-go="s-advice">The advisory tool</button>
+  <button data-go="s-decisions">Design decisions</button>
+  <button data-go="s-case">Case study</button>
+  <button data-go="s-wars">War stories</button>
+  <button data-go="s-open">Open findings</button>
+  <button data-go="s-glossary">Glossary</button>
+  <span class="spacer"></span>
+  <button id="theme" type="button">Theme</button>
+</nav>
+
+<!-- ================================================================ -->
+<section id="s-problem">
+  <h2>1 · The problem, in one sentence</h2>
+  <div class="note crit">
+    <span class="tag">The whole point</span>
+    <p><strong>A confident wrong answer, not an error.</strong> The view refresh succeeds. The data is old.
+    No log line says so. Every requirement below exists to turn that silence into a loud answer.</p>
+  </div>
+  <p>Two questions need two different tools. This is the core design split.</p>
+  <div class="grid c2">
+    <div class="card q">
+      <span class="tagp acc">Tool 1 · advisory</span>
+      <h3><code>advise("sales.gold.customer_360")</code></h3>
+      <p><strong>Question:</strong> When can this view <em>usually</em> run, with every upstream job finished?</p>
+      <p><strong>Method:</strong> Read 30 days of history. Predict a <strong>safe</strong> time and an <strong>earlier</strong> time.</p>
+      <p><strong>Nature:</strong> A prediction. It does not check today. Pair it with the gate.</p>
+    </div>
+    <div class="card a">
+      <span class="tagp good">Tool 2 · the gate</span>
+      <h3><code>can_refresh("sales.gold.v_orders")</code></h3>
+      <p><strong>Question:</strong> Can this view refresh <em>right now</em>? Is every dependency fresh?</p>
+      <p><strong>Method:</strong> Walk every dependency. Check its last real write against its own rolling window.</p>
+      <p><strong>Nature:</strong> The product. It decides. It never refreshes. READY only when everything is fresh.</p>
+    </div>
+  </div>
+  <div class="note">
+    <span class="tag">Boundary rule</span>
+    <p><strong>Read-only, decide-only.</strong> The package never writes, alters, optimizes, or refreshes anything.
+    All I/O is metadata and history reads. If a change would write to your data, it is out.</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-journey">
+  <h2>2 · Follow one view, end to end</h2>
+  <p>Click a step. The panel shows what happens and why it exists.</p>
+
+  <div class="stepper" id="stepper" role="tablist" aria-label="Pipeline steps"></div>
+
+  <div id="step-panels">
+    <div class="step-panel" data-step="0">
+      <h3>You call the gate</h3>
+      <p>One line inside a Databricks job. <code>result = can_refresh("sales.gold.v_orders")</code>.
+      The warehouse ID comes from the <code>WAREHOUSE_ID</code> environment variable, so no configuration is needed in the common case.</p>
+      <p>You may pass one view or a list. A list gives one verdict per view and one overall verdict.</p>
+      <span class="where">gate.py → can_refresh()</span>
+    </div>
+    <div class="step-panel" data-step="1">
+      <h3>The workspace seam opens the door</h3>
+      <p>Every external call goes through one small object: <code>Workspace</code>. It wraps the Databricks SDK and the SQL Statement API.</p>
+      <p><strong>Why one seam?</strong> The walk and the gate run offline in tests with no network and no credentials.
+      The tests inject a fake <code>Workspace</code>. A second I/O path would break that.</p>
+      <span class="where">client.py → Workspace · get_table() · sql()</span>
+    </div>
+    <div class="step-panel" data-step="2">
+      <h3>The walk finds the physical tables</h3>
+      <p>The gate asks Unity Catalog for the view. It reads <code>view_dependencies</code>. The name sits one level down:
+      <code>dependency["table"]["table_full_name"]</code>.</p>
+      <p>Views inside views are followed. The walk stops at physical tables, materialized views, and streaming tables.
+      A cycle is a blocker. A depth cap of 60 stops runaway graphs. Every dependency ends in one list with an
+      <code>ok</code> flag — measured tables, cycles, unreadable objects, function notes. One list, not three channels.</p>
+      <span class="where">walker.py → walk()</span>
+    </div>
+    <div class="step-panel" data-step="3">
+      <h3>Each table tells its last write</h3>
+      <p>For a table or streaming table: <code>DESCRIBE HISTORY</code> through the SQL Statement API.
+      Timestamps are read as <strong>epochs</strong>, not rendered strings — a rendered timestamp depends on the
+      warehouse session time zone, which the tool does not control.</p>
+      <p>A materialized view rejects <code>DESCRIBE HISTORY</code>. Its completed refreshes come from the pipeline
+      event log instead. A streaming table is a Delta table and answers <code>DESCRIBE HISTORY</code> — its refreshes
+      appear as <code>STREAMING UPDATE</code> commits.</p>
+      <span class="where">client.py → read_delta_history() · read_mv_refreshes() · read_latest_commit()</span>
+    </div>
+    <div class="step-panel" data-step="4">
+      <h3>Each commit gets a class</h3>
+      <p>The classifier reads the <strong>operation name</strong> and the <strong>mode</strong> together.
+      A plain <code>WRITE</code> plus mode <code>Overwrite</code> is a full replace. <code>WRITE</code> plus
+      <code>Append</code> is incremental. <code>OPTIMIZE</code>, <code>VACUUM</code>, <code>DELETE</code> and
+      friends are maintenance and never count.</p>
+      <p><strong>A zero-row write still counts.</strong> A full replace that produced no rows still ran. So did a
+      zero-row append. The pipeline ran that day; the data is as fresh as it gets.</p>
+      <span class="where">history.py → classify() · qualifying()</span>
+    </div>
+    <div class="step-panel" data-step="5">
+      <h3>The window decides</h3>
+      <p>Each table is checked against its own schedule. A daily table gets <code>fresh_hours</code>, default 24.
+      A table that runs less often gets a wider window: the longest gap between its run weekdays, plus one, times
+      <code>fresh_hours</code>. A write exactly at the edge is fresh. One second past is stale.</p>
+      <p>A write dated <strong>after</strong> the reference time is ignored. A clock-skewed future commit must not
+      make a stale table look fresh.</p>
+      <span class="where">gate.py → _history_summary() · _verdict_for() · config.py → fresh_hours</span>
+    </div>
+    <div class="step-panel" data-step="6">
+      <h3>The report speaks plainly</h3>
+      <p>One block per view. Every dependency gets a line, with its age — not only the blockers.
+      Every blocker names the dependency <strong>and</strong> the view that needs it. The report ends with one
+      actionable line: what to refresh, and for whom.</p>
+      <p>Anything unreadable <strong>blocks</strong> the view. The gate fails closed. It never raises for a
+      dependency problem.</p>
+      <span class="where">gate.py → GateResult.render()</span>
+    </div>
+    <div class="step-panel" data-step="7">
+      <h3>Your job acts on the answer</h3>
+      <pre><code>result = can_refresh("sales.gold.v_orders")
+if result.ready:
+    ...run the refresh...
+else:
+    print(result)   # says exactly what to fix</code></pre>
+      <p>The gate decided. The gate did not refresh. That split is deliberate and permanent.</p>
+      <span class="where">your job · not this package</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-gate">
+  <h2>3 · The gate rules — the whole table</h2>
+  <p>These rules are the product. Every row is tested. Read them as: <em>if this, then that</em>.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Case</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Wrote inside the window</td><td><span class="pill fresh">fresh</span></td></tr>
+        <tr><td>Wrote before the window</td><td><span class="pill stale">stale — blocks the view</span></td></tr>
+        <tr><td>No qualifying write in its history</td><td><span class="pill block">blocks</span></td></tr>
+        <tr><td>Cannot be read (missing, no permission, any error)</td><td><span class="pill block">blocks — the gate fails closed</span></td></tr>
+        <tr><td>A table that runs less often than daily, on a trusted schedule</td><td><span class="pill fresh">checked against its own wider window (v0.7.0)</span></td></tr>
+        <tr><td>A table seen on all seven weekdays</td><td><span class="pill note">a daily table with outages — keeps the daily window</span></td></tr>
+        <tr><td>A table with a thin or new history</td><td><span class="pill note">checked on the daily window</span></td></tr>
+        <tr><td>Streaming table</td><td><span class="pill fresh">checked from its history, like any table (v0.4.0)</span></td></tr>
+        <tr><td>Materialized view</td><td><span class="pill fresh">read from its pipeline event log</span></td></tr>
+        <tr><td>Function dependency (a SQL UDF)</td><td><span class="pill note">a note, not a blocker — see finding A1</span></td></tr>
+        <tr><td>Dependency cycle</td><td><span class="pill block">blocks</span></td></tr>
+        <tr><td>Depth cap exceeded</td><td><span class="pill block">blocks</span></td></tr>
+        <tr><td>View reports no dependencies at all</td><td><span class="pill block">blocks (fail closed)</span></td></tr>
+        <tr><td>Dependency is a plain managed or external table</td><td><span class="pill fresh">a leaf; check it normally</span></td></tr>
+        <tr><td>A plain table is passed as the root</td><td><span class="pill fresh">it is its own dependency; check it</span></td></tr>
+        <tr><td>The same view appears twice in the list</td><td><span class="pill note">report it twice</span></td></tr>
+        <tr><td>Write exactly N hours old</td><td><span class="pill fresh">fresh (the edge belongs to the window)</span></td></tr>
+        <tr><td>Write one second past N hours</td><td><span class="pill stale">stale</span></td></tr>
+        <tr><td>Future-dated commit (clock skew)</td><td><span class="pill stale">ignored</span></td></tr>
+        <tr><td><code>fresh_hours &lt;= 0</code></td><td><span class="pill block">error, not a silent window</span></td></tr>
+        <tr><td>Diamond: two views share one dependency</td><td><span class="pill note">fetched once, reported everywhere</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The decision ladder</h3>
+  <p>Every dependency falls down this ladder. The first matching rung decides.</p>
+  <div class="ladder">
+    <div class="lrow"><span class="lq"><b>What is it?</b> A view → recurse. A function → note. Anything unreadable → block.</span><span class="pill note">shape</span></div>
+    <div class="lrow"><span class="lq"><b>Is it a streaming table?</b> Read its Delta history like a table. A scheduled one is stale between runs.</span><span class="pill fresh">history</span></div>
+    <div class="lrow"><span class="lq"><b>Is it a materialized view?</b> Read its pipeline event log for a completed refresh.</span><span class="pill fresh">event log</span></div>
+    <div class="lrow"><span class="lq"><b>Is there a qualifying write?</b> A write that ran — even with zero rows. Maintenance never counts.</span><span class="pill note">classify</span></div>
+    <div class="lrow"><span class="lq"><b>Is it inside its own window?</b> A daily table gets <code>fresh_hours</code>; a trusted weekly-ish table gets a wider one. And not dated after the reference time?</span><span class="pill fresh">fresh</span></div>
+    <div class="lrow"><span class="lq">Any rung fails or errors → the dependency blocks the view, with a plain reason.</span><span class="pill block">stale / blocked</span></div>
+    <div class="lrow"><span class="lq">All dependencies fresh → <b>READY</b>. The job may refresh.</span><span class="pill fresh">ready</span></div>
+  </div>
+
+  <h3>What a report looks like</h3>
+  <pre><code>GATE  BLOCKED   1 view, window 24h, times UTC
+
+  BLOCKED c.s.v
+      stale  c.s.t_old  (MANAGED)  last refresh 2026-08-04 04:00 UTC (2d 8h ago) — older than the 24h window
+      fresh  c.s.t_fresh  (MANAGED)  last refresh 2026-08-06 04:00 UTC (8h 00m ago)
+
+To unblock, refresh:
+  c.s.t_old   (needed by c.s.v)</code></pre>
+  <p class="lead" style="font-size:1rem">Readable at 3am by a junior engineer. The exact text is pinned by a golden test.</p>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-sim">
+  <h2>4 · Try the gate</h2>
+  <p>Change the dependencies. The verdict and the report update the same way the real code decides.
+  The clock is fixed at 2026-10-09 12:00 IST so the results are stable.</p>
+
+  <div class="sim">
+    <div class="sim-controls">
+      <h3>Dependencies of <code>c.s.v</code></h3>
+      <div class="presets" id="presets">
+        <button data-preset="allf">All fresh</button>
+        <button data-preset="stale">Classic stale</button>
+        <button data-preset="gap">The 24-day gap</button>
+        <button data-preset="unread">Fail closed</button>
+        <button data-preset="fn">Function only (A1)</button>
+        <button data-preset="skew">Clock skew</button>
+      </div>
+      <div class="sim-row">
+        <label for="w">Window (fresh_hours)</label>
+        <select id="w"><option value="24" selected>24 hours</option><option value="48">48 hours</option><option value="72">72 hours</option><option value="6">6 hours</option></select>
+      </div>
+      <div id="simRows"></div>
+    </div>
+    <div class="sim-out">
+      <div class="bar"><span id="verdict" class="ready">READY</span><span style="color:var(--ink-mute);font-size:13px">simulated · no network</span></div>
+      <div class="note warn" id="simBanner"><span class="tag">Open finding A1</span>
+        <p>All dependencies are functions. The code answers READY after measuring <strong>nothing</strong>.
+        If a function reads a stale table, this answer is wrong. See the open findings.</p></div>
+      <pre id="simReport"></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-advice">
+  <h2>5 · The advisory tool — how a safe time appears</h2>
+  <p>The advisory tool reads the last 30 days. For each dependency it keeps the <strong>first</strong> qualifying
+  write of each local day. That is the day's finish time. Then it intersects the days.</p>
+  <div class="grid c3">
+    <div class="card q">
+      <span class="tagp acc">1 · per day</span>
+      <h3>Each table's finish time</h3>
+      <p>For each local day, take the first commit that is a real refresh. OPTIMIZE at 09:00 does not count;
+      a zero-row append at 04:00 does.</p>
+    </div>
+    <div class="card q">
+      <span class="tagp acc">2 · intersect</span>
+      <h3>Days when everything finished</h3>
+      <p>Keep only the days where <em>every</em> dependency has a finish time. One missing table removes the day.</p>
+    </div>
+    <div class="card a">
+      <span class="tagp good">3 · choose</span>
+      <h3>Safe and earlier</h3>
+      <p><strong>safe</strong> = the latest finish time seen on the all-clear days, plus the buffer (15 min).
+      <strong>earlier</strong> = the typical day: the median finish time of the all-clear days, plus the same buffer. A slower day still finishes after it.</p>
+    </div>
+  </div>
+  <div class="note warn">
+    <span class="tag">Open finding B1 — read before you rely on it</span>
+    <p>The tool assumes the <strong>first</strong> commit of a day means "finished loading". A table that writes a
+    small early commit and the real load later gets a safe time at the wrong moment. The only guard is a
+    "continuous" flag that needs 6+ commits a day. This matters. See finding B1.</p>
+  </div>
+  <p><strong>The buffer and midnight.</strong> A 23:50 finish plus a 15-minute buffer crosses midnight.
+  The report marks it <code>(+1 day)</code> and warns. Nothing is silently wrapped.</p>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-decisions">
+  <h2>6 · The design decisions that matter</h2>
+  <p>Open each card. The pattern is the same everywhere: <em>decision → why → what breaks without it</em>.</p>
+
+  <details open><summary><span class="dnum">D1</span>Read-only. Decide-only. Never refresh.</summary>
+  <div class="body">
+    <p>The package answers one question and stops. The calling job acts.</p>
+    <p><strong>Why:</strong> A tool that can refresh can also refresh wrongly. Splitting the decision from the
+    action keeps the blast radius at zero. A wrong decision is a log line; a wrong write is an incident.</p>
+    <p><strong>Without it:</strong> the gate could trigger a refresh loop, or mask the very staleness it reports.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D2</span>Fail closed: a false BLOCK beats a false READY.</summary>
+  <div class="body">
+    <p>Unreadable, missing, no history, cycle, depth cap, view with no dependencies — each one blocks.</p>
+    <p><strong>Why:</strong> The product exists to stop a confident wrong answer. "I could not check" must never
+    read as "it is fine".</p>
+    <p><strong>Without it:</strong> a permission error on one table turns into a silent READY. That is the original
+    bug in a new costume.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D3</span>A rolling window in hours, not a calendar day.</summary>
+  <div class="body">
+    <p>Default 24 hours. One value per call. Overridable with <code>fresh_hours</code>.</p>
+    <p><strong>Why:</strong> "Ran today" is true at 00:01 for a table that ran at 00:00 yesterday. A rolling
+    window matches the real question: "did it write recently enough?".</p>
+    <p><strong>Without it:</strong> a stale table looks fresh right after midnight.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D4</span>Classify by mode, not by operation name.</summary>
+  <div class="body">
+    <p>The commonest Delta operation is plain <code>WRITE</code>. Only <code>operationParameters.mode</code>
+    says whether it replaced or appended a table.</p>
+    <p><strong>Why:</strong> Classify by name alone and most tables read as dormant — a confident wrong answer,
+    not an error. This bug shipped once.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D5</span>A zero-row write still counts as a refresh.</summary>
+  <div class="body">
+    <p>A full replace that produced no rows still ran. So did a zero-row append.</p>
+    <p><strong>Why:</strong> The question is "did the pipeline run?", not "did it produce data?". A quiet day is
+    not a missed day.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D6</span>Read time as epochs, never as rendered strings.</summary>
+  <div class="body">
+    <p><code>SELECT unix_timestamp(timestamp)</code> returns the instant. A rendered TIMESTAMP string depends on the
+    warehouse session time zone, which this tool does not control.</p>
+    <p><strong>Why:</strong> Stamping a naive value with the config zone is wrong by the UTC offset. This bug
+    shipped once too.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D7</span>Quote every name part. Encode every URL path.</summary>
+  <div class="body">
+    <p>Backtick each dot-separated part. Double an inner backtick. Percent-encode the metadata path.</p>
+    <p><strong>Why:</strong> A hyphenated name is subtraction unless quoted. An unquoted name is an injection
+    surface.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D8</span>Read every result chunk. Refuse a truncated result.</summary>
+  <div class="body">
+    <p>The SQL Statement API paginates. The reader follows the chunks to the end. A truncated manifest raises.</p>
+    <p><strong>Why:</strong> Using only the first page hides older commits. The gate would call a fresh table
+    stale — or worse, date it wrongly.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D9</span>A materialized view is read from its pipeline event log.</summary>
+  <div class="body">
+    <p>An MV rejects <code>DESCRIBE HISTORY</code>. Its completed refreshes live in
+    <code>event_log(TABLE(mv))</code> as <code>update_progress</code> events with state <code>COMPLETED</code>.</p>
+    <p><strong>Open edge (A2):</strong> that event is pipeline-scoped. An update that skipped this MV still counts today.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D10</span>A streaming table is checked from its history — v0.4.0 reversal.</summary>
+  <div class="body">
+    <p>Until v0.3.0 the rule was "a streaming table is always fresh". Live data disproved it: a scheduled streaming
+    table went 24 days without a single commit. The gate called it fresh through all of them — a false READY.</p>
+    <p><strong>Now:</strong> a streaming table is a Delta table. Read its history. Apply the same window. A scheduled
+    one is stale between runs; a paused one is stale the whole time it is paused.</p>
+    <p><strong>Why it is safe:</strong> a continuous streaming table that ingests writes commits often and stays
+    fresh naturally. See the case study below.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D11</span>A function dependency is a note, not a blocker.</summary>
+  <div class="body">
+    <p>A SQL UDF usually has no refresh to wait for, so it does not block.</p>
+    <p><strong>Open edge (A1):</strong> a UDF with <code>READS SQL DATA</code>, or a table-valued function, can read a
+    physical table. Unity Catalog records only the function. The gate then answers READY without measuring that
+    table. This is the same shape as the "always fresh" bug. It needs your decision.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D12</span>The cycle guard tracks in-progress and resolved names apart.</summary>
+  <div class="body">
+    <p>A single "seen" set fails open: nothing left to check, and <code>all(())</code> is <code>True</code> — a
+    cycle reported READY. The guard tests a name as in-progress (a back edge = a cycle) and as resolved.</p>
+    <p><strong>Why:</strong> the empty-set trap is easy to reintroduce. It is tested.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D13</span>The walk stops at tables, materialized views, and streaming tables.</summary>
+  <div class="body">
+    <p>Recurse views only. Everything else is a leaf with its own freshness check.</p>
+    <p><strong>Open edge (A3):</strong> the API also sets <code>view_dependencies</code> for MV and streaming
+    types. The walk does not follow them. An MV refreshed on schedule from a stale source reads fresh today.
+    Deliberate — but now a measured blind spot.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D14</span>One list of dependencies per view.</summary>
+  <div class="body">
+    <p>Measured tables, cycles, unreadable objects, and function notes all become one <code>Dependency</code> with
+    an <code>ok</code> flag. The verdict is <code>all(d.ok)</code>.</p>
+    <p><strong>Why:</strong> one channel means one place to check, one report format, and no path where a
+    blocker gets lost between lists. Three channels drift apart.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D15</span>Every blocker names the dependency and the view that needs it.</summary>
+  <div class="body">
+    <p>The report ends with: <code>c.s.t_old   (needed by c.s.v)</code>.</p>
+    <p><strong>Why:</strong> at 3am, "something is stale" is useless. The fix must be copy-pasteable.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D16</span>Four settings only. Ask before a fifth.</summary>
+  <div class="body">
+    <p><code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (Asia/Kolkata),
+    <code>fresh_hours</code> (24). That is the whole surface.</p>
+    <p><strong>Why:</strong> every new setting doubles the number of behaviours to test and document. The v0.4.0
+    streaming-table change added none. It needed none.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D17</span>Bump the version when behaviour changes.</summary>
+  <div class="body">
+    <p>The pre-gate wheel and the gate wheel were both <code>0.1.0</code> once. Pinning was impossible.
+    The v0.4.0 change to streaming tables follows this rule.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D18</span>All tests run offline. Pinned clock. Golden report text.</summary>
+  <div class="body">
+    <p>No network, no warehouse, no Spark, no credentials. A fake <code>Workspace</code> injects history.
+    Every test passes <code>now=</code>, so the rolling window is deterministic. The report text is pinned
+    byte-for-byte by a golden test.</p>
+    <p><strong>Open gap (E1):</strong> the tests never exercise the real SQL seam — pagination, chunks, the
+    timeout. See the findings.</p>
+  </div></details>
+
+  <details><summary><span class="dnum">D19</span>Plain words in every user-visible string.</summary>
+  <div class="body">
+    <p>The two times are called <strong>safe</strong> and <strong>earlier</strong>. The columns are
+    <code>RUNS / USUAL / LATEST / DAYS / MISSED</code>. Never "tighter", "all-clear", or jargon like "window"
+    without the number.</p>
+  </div></details>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-case">
+  <h2>7 · Case study: the streaming table that was not always fresh</h2>
+  <p>This is the clearest example of the class of bug this project hunts. It is now fixed. The proof comes from
+  your own live schema, read-only.</p>
+
+  <div class="tl">
+    <svg viewBox="0 0 1060 240" style="width:100%;height:auto" role="img"
+         aria-label="Commit timeline of workspace.sched_rig.st_stream from September 5 to October 9 2026. Daily commits until September 13, then a 24-day gap, then commits on October 6, 7 and 8.">
+      <line x1="60" y1="120" x2="1020" y2="120" stroke="var(--rule)" stroke-width="2"/>
+      <!-- gap band -->
+      <rect x="238" y="70" width="612" height="100" fill="var(--crit-soft)" opacity="0.55"/>
+      <text x="544" y="62" text-anchor="middle" font-family="Courier New, monospace" font-size="13" fill="var(--crit)">24 days with no commit — the old rule still said FRESH</text>
+      <!-- commits Sep 5-13 -->
+      <g fill="var(--good)">
+        <circle cx="80" cy="120" r="7"/><circle cx="128" cy="120" r="7"/><circle cx="176" cy="120" r="7"/>
+        <circle cx="224" cy="120" r="7"/><circle cx="272" cy="120" r="7"/><circle cx="320" cy="120" r="7"/>
+        <circle cx="368" cy="120" r="7"/><circle cx="416" cy="120" r="7"/><circle cx="464" cy="120" r="7"/>
+      </g>
+      <!-- Oct 6,7,8 -->
+      <g fill="var(--good)">
+        <circle cx="800" cy="120" r="7"/><circle cx="848" cy="120" r="7"/><circle cx="896" cy="120" r="7"/>
+      </g>
+      <text x="80" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--ink-mute)">Sep 5</text>
+      <text x="464" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--ink-mute)">Sep 13</text>
+      <text x="800" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--ink-mute)">Oct 6</text>
+      <text x="896" y="98" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--ink-mute)">Oct 8</text>
+      <text x="464" y="150" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--crit)">last write before the gap</text>
+      <text x="896" y="150" text-anchor="middle" font-family="Courier New, monospace" font-size="11" fill="var(--good)">writes resume</text>
+      <text x="60" y="205" font-family="Courier New, monospace" font-size="11.5" fill="var(--ink-mute)">Each dot = one STREAMING UPDATE commit (23:2x UTC, daily). Chart shows the verified tail of 20 commits.</text>
+      <text x="60" y="225" font-family="Courier New, monospace" font-size="11.5" fill="var(--ink-mute)">Old rule: "a streaming table is always fresh — do not read its history." New rule v0.4.0: read the history, apply the window.</text>
+    </svg>
+  </div>
+
+  <div class="case">
+    <div class="card w">
+      <span class="tagp warn">Before · v0.3.0</span>
+      <h3>Fresh by definition</h3>
+      <p>The gate never read the table's history. It answered <strong>fresh</strong> on every one of the 24 gap days.</p>
+      <p>A view that depended on this table would refresh with day-old (or month-old) data, confidently.</p>
+    </div>
+    <div class="card a">
+      <span class="tagp good">After · v0.4.0</span>
+      <h3>Checked from history</h3>
+      <p>The gate reads <code>STREAMING UPDATE</code> commits like any write. The same 24h window applies.</p>
+      <p>During the gap the verdict is <strong>BLOCKED</strong> after the first 24 hours, until the writes resume.
+      No new setting. No new I/O path. The classifier already knew the operation.</p>
+    </div>
+  </div>
+  <div class="note good">
+    <span class="tag">Why this matters beyond one table</span>
+    <p>The bug was not a crash. It was a design rule — "always fresh" — that sounded safe and was wrong for a
+    subclass: the scheduled streaming table. Every open finding below is checked for this same shape.</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-wars">
+  <h2>8 · War stories — bugs already found and fixed</h2>
+  <p>Each one shipped once. Each one now has a test. They teach the traps.</p>
+  <details><summary>A cycle reported READY</summary>
+  <div class="body">
+    <p>Deduplicating on one "seen" set left nothing to check, and <code>all(())</code> is <code>True</code>.
+    The empty set passed the test. Now in-progress and resolved names are tracked apart, and a cycle blocks.</p>
+  </div></details>
+  <details><summary>Naive UTC stamped with the config zone</summary>
+  <div class="body">
+    <p>A notebook returns a naive UTC datetime. The code stamped it with the config zone — wrong by the UTC
+    offset. Fix: read epochs. An epoch is the same instant everywhere.</p>
+  </div></details>
+  <details><summary>Only the first result page was read</summary>
+  <div class="body">
+    <p>The SQL Statement API paginates. The first version read page one and stopped — older commits invisible.
+    Fix: follow every chunk and refuse a truncated result.</p>
+  </div></details>
+  <details><summary>A future-dated commit passed as fresh</summary>
+  <div class="body">
+    <p>A clock-skewed commit dated after "now" made a stale table look fresh. Fix: ignore writes after the
+    reference time.</p>
+  </div></details>
+  <details><summary>Unquoted names in SQL and URLs</summary>
+  <div class="body">
+    <p>A hyphenated name becomes subtraction. An unquoted name is an injection surface. Fix: quote every part,
+    encode the path.</p>
+  </div></details>
+  <details><summary>A hand-written README example was wrong in three ways</summary>
+  <div class="body">
+    <p>Nobody noticed for weeks. Fix: generate the sample output from the code, and pin the report with a
+    golden test.</p>
+  </div></details>
+  <details><summary>Docs that said the gate was never built</summary>
+  <div class="body">
+    <p>The docs pointed the reader at themselves while describing a missing tool. Fix: docs track the code.
+    The runtime gate ships as <code>can_refresh</code>.</p>
+  </div></details>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-open">
+  <h2>9 · Open findings — proposed changes, waiting for approval</h2>
+  <p>A deep audit (five independent passes over the gate, the walk, the I/O seam, the advisory tool, and the
+  Databricks docs) found these. None is fixed yet. Filter by type.</p>
+  <div class="filters" id="filters">
+    <button class="on" data-f="all">All</button>
+    <button data-f="ready">False READY</button>
+    <button data-f="advice">Wrong time</button>
+    <button data-f="block">False BLOCK</button>
+    <button data-f="crash">Crash / tooling</button>
+    <button data-f="test">Tests</button>
+  </div>
+  <div class="scroll">
+    <table id="findings">
+      <thead><tr><th style="width:70px">ID</th><th>Finding</th><th style="width:150px">Type</th><th>Proposed fix</th></tr></thead>
+      <tbody>
+        <tr data-t="ready decide"><td><strong>A1</strong></td>
+          <td>A function dependency hides the tables it reads. A SQL UDF with <code>READS SQL DATA</code>, or a table-valued function, can read a physical table. UC records only the function. The gate answers READY without measuring that table. A function-only view is READY with nothing measured.</td>
+          <td><span class="chip readnor">false READY</span> <span class="chip decide">needs decision</span></td>
+          <td>Make an unresolvable function a blocker, or follow <code>routine_dependencies</code> where possible. Reverses a settled decision — owner call.</td></tr>
+        <tr data-t="ready"><td><strong>A2</strong></td>
+          <td>The MV event log is pipeline-scoped, not MV-scoped. A shared pipeline can complete an update that skipped this MV ("select tables for refresh"). The gate reads COMPLETED and calls the MV fresh.</td>
+          <td><span class="chip readnor">false READY</span></td>
+          <td>Count only this object's own completed update; verify against a live shared pipeline.</td></tr>
+        <tr data-t="ready decide"><td><strong>A3</strong></td>
+          <td>The walk stops at MVs and streaming tables. The API sets <code>view_dependencies</code> for those types too. An MV refreshed from a stale source reads fresh today.</td>
+          <td><span class="chip readnor">false READY</span> <span class="chip decide">needs decision</span></td>
+          <td>Follow MV/ST dependencies one level, or record the blind spot as accepted. Owner call.</td></tr>
+        <tr data-t="ready"><td><strong>A4</strong></td>
+          <td>A failed or canceled streaming refresh can leave committed batches behind. <code>DESCRIBE HISTORY</code> shows the commit, not the failure. A partly-failed refresh reads fresh.</td>
+          <td><span class="chip readnor">false READY</span></td>
+          <td>Cross-check the pipeline event log for a COMPLETED update covering this table.</td></tr>
+        <tr data-t="fine"><td><strong>A5</strong></td>
+          <td>A naive <code>now</code> in a DST zone picks the wrong offset on the ambiguous hour.</td>
+          <td><span class="chip readnor">false READY</span></td>
+          <td>Reject a naive <code>now</code>, or document the requirement. Low blast radius; the default clock is correct.</td></tr>
+        <tr data-t="advice"><td><strong>B1</strong></td>
+          <td>The advisory tool treats the first commit of a day as "finished loading". A table with a small early commit and a later real load (or 2–5 batches a day) gets a safe time at the wrong moment. The rig cannot catch it — the oracle shares the assumption.</td>
+          <td><span class="chip advice">wrong time</span></td>
+          <td>Detect multi-write tables and say so, or use the last qualifying commit of the day for the safe time.</td></tr>
+        <tr data-t="advice"><td><strong>B2</strong></td>
+          <td>An unreadable dependency is dropped from the intersection, but the headline still says "every job had finished". A late, unreadable job cannot push the safe time later.</td>
+          <td><span class="chip advice">wrong time</span></td>
+          <td>Refuse to print a safe time when any dependency is unreadable.</td></tr>
+        <tr data-t="advice"><td><strong>B3</strong></td>
+          <td>Clock-time sort across midnight inverts safe and earlier: a 00:05 finish sorts before a 23:55 finish.</td>
+          <td><span class="chip advice">wrong time</span></td>
+          <td>Sort by full datetime, then compare clock times only for display.</td></tr>
+        <tr data-t="advice crash"><td><strong>B4</strong></td>
+          <td><code>buffer_min</code> is never validated. <code>--buffer -30</code> shifts the safe time earlier than anything observed. <code>--days 0</code> crashes the CLI with a raw traceback.</td>
+          <td><span class="chip advice">wrong time</span> <span class="chip crash">crash</span></td>
+          <td>Validate both settings at construction time, inside the CLI error handling.</td></tr>
+        <tr data-t="block"><td><strong>C1</strong></td>
+          <td>Shallow clones (<code>MANAGED_SHALLOW_CLONE</code>, <code>EXTERNAL_SHALLOW_CLONE</code>) are real Delta tables with history, but they are not in the gating set. A view on a fresh clone blocks.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Add both types to the gating set. Verify history on a live clone.</td></tr>
+        <tr data-t="block"><td><strong>C2</strong></td>
+          <td><code>FOREIGN</code>, <code>METRIC_VIEW</code>, <code>ONLINE</code>, and connection/credential dependency kinds fall to "unrecognised" and block.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Give each kind an explicit rule: check, note, or block with a specific reason.</td></tr>
+        <tr data-t="block"><td><strong>C3</strong></td>
+          <td>A slow history read or a cold serverless start cancels against the 50s timeout. A history over 25&nbsp;MiB aborts. A fresh, busy table blocks — every call.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Use <code>on_wait_timeout=CONTINUE</code> with polling, and bound the history read.</td></tr>
+        <tr data-t="block"><td><strong>C4</strong></td>
+          <td>Managed Iceberg tables gate, but their history operations do not match the Delta classifier. Unknown operations do not count.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Classify Iceberg operations, or name the unknown ones in the gate report.</td></tr>
+        <tr data-t="block"><td><strong>C5</strong></td>
+          <td>The gate reports "no qualifying refresh in history" even when the truth is "wrote with an operation we do not know". The advisory tool names unknown operations; the gate does not.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Carry the unknown-operation names into the gate's detail text.</td></tr>
+        <tr data-t="block"><td><strong>C6</strong></td>
+          <td>The MV fallback fires on one exact error string; a JSON-path drift in the event log returns "no qualifying refresh" instead of a read error.</td>
+          <td><span class="chip block">false BLOCK</span></td>
+          <td>Broaden the fallback trigger; distinguish "empty event log" from "query drifted".</td></tr>
+        <tr data-t="crash"><td><strong>D1</strong></td>
+          <td><code>tools/classify_real.py</code> imports <code>_read</code> from <code>run.py</code>. That symbol no longer exists. The committed tool is broken.</td>
+          <td><span class="chip crash">crash</span></td>
+          <td>Update the import to the current API.</td></tr>
+        <tr data-t="crash"><td><strong>D2</strong></td>
+          <td>One malformed history row (NULL timestamp, short row) poisons the whole table read. The reason shown is a read failure, not the real state.</td>
+          <td><span class="chip crash">crash</span></td>
+          <td>Skip a malformed row, or fail the table with a specific reason.</td></tr>
+        <tr data-t="test"><td><strong>E1</strong></td>
+          <td>The real <code>Workspace.sql</code> seam has zero offline tests. Pagination, chunks, the truncation guard, the manifest, the timeout — the code where C3 and D2 live — never runs in the suite.</td>
+          <td><span class="chip test">tests</span></td>
+          <td>Add offline tests with a fake SDK transport for the seam.</td></tr>
+        <tr data-t="test"><td><strong>E2</strong></td>
+          <td>The fake <code>Workspace</code> in tests routes SQL by the substring <code>event_log</code>. A table named like that is misrouted in tests.</td>
+          <td><span class="chip test">tests</span></td>
+          <td>Match the real statement shape, not a substring.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note warn">
+    <span class="tag">Suggested order</span>
+    <p>1 · A1 (false READY, needs your decision like the streaming-table reversal did) ·
+    2 · A2 and A4 (MV and streaming event signals) ·
+    3 · C1 and C2 (needless blocks) ·
+    4 · C3 (read limits) ·
+    5 · E1 (test the seam).</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="s-glossary">
+  <h2>10 · Glossary and file map</h2>
+  <div class="grid c2">
+    <div class="card">
+      <h3>Terms in one line each</h3>
+      <ul>
+        <li><strong>View</strong> — a saved query. It stores no data; its answer is computed when read.</li>
+        <li><strong>Materialized view (MV)</strong> — a view whose result is stored and refreshed by a pipeline.</li>
+        <li><strong>Streaming table</strong> — a table fed by a streaming pipeline. It can run continuously or on a schedule.</li>
+        <li><strong>Delta table</strong> — a table with a commit history. <code>DESCRIBE HISTORY</code> lists every write.</li>
+        <li><strong>Commit</strong> — one write to a table: a version, a time, an operation, a mode.</li>
+        <li><strong>Event log</strong> — a pipeline's own record of updates. An MV's refreshes live here.</li>
+        <li><strong>Qualifying write</strong> — a write that ran and counts as a refresh. Zero rows is fine. OPTIMIZE is not.</li>
+        <li><strong>Rolling window</strong> — "within the last N hours", checked against the exact moment. Not a calendar day.</li>
+        <li><strong>Fail closed</strong> — when in doubt, BLOCK. A false BLOCK beats a false READY.</li>
+        <li><strong>Epoch</strong> — seconds since 1970 UTC. The same instant in every time zone.</li>
+        <li><strong>Golden test</strong> — a test that pins exact output text.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Where the code lives</h3>
+      <ul>
+        <li><code>gate.py</code> — <code>can_refresh</code>, the verdict, the report.</li>
+        <li><code>walker.py</code> — dependency walk, cycle guard, depth cap.</li>
+        <li><code>client.py</code> — the read-only I/O seam. Every external call.</li>
+        <li><code>history.py</code> — the commit classifier. Pure, no I/O.</li>
+        <li><code>config.py</code> — the four settings.</li>
+        <li><code>run.py</code> — the collector and <code>analyze()</code>.</li>
+        <li><code>recommend.py</code> — safe and earlier times. Pure math.</li>
+        <li><code>advice.py</code> / <code>report.py</code> — the advisory result and its text.</li>
+        <li><code>tests/</code> — 270 offline tests, a fake Workspace, pinned clock.</li>
+        <li><code>rig/</code> — the 61-day live fixture that writes real history.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note good">
+    <span class="tag">The one habit to keep</span>
+    <p>When a rule says <em>always</em>, ask: always for which subclass? That question found the streaming-table bug.
+    It now questions the function rule (A1) and the walk depth (A3).</p>
+  </div>
+</section>
+
+<footer>
+  view-scheduler 0.7.0 · generated 2026-10-16 · read-only by design ·
+  sources: README.md, HANDOFF.md, src/view_scheduler, live workspace.sched_rig probe ·
+  this page is self-contained; open it in any browser.
+</footer>
+
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- nav ----------
+  document.querySelectorAll("nav.toc button[data-go]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var el = document.getElementById(b.getAttribute("data-go"));
+      if (el) el.scrollIntoView({behavior:"smooth", block:"start"});
+    });
+  });
+  document.getElementById("theme").addEventListener("click", function(){
+    var root = document.documentElement;
+    var dark = root.getAttribute("data-theme") === "dark" ||
+      (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // ---------- stepper ----------
+  var STEPS = [
+    "1 · Call the gate",
+    "2 · Workspace seam",
+    "3 · Walk dependencies",
+    "4 · Read last writes",
+    "5 · Classify commits",
+    "6 · Measure the window",
+    "7 · Verdict and report",
+    "8 · Your job acts"
+  ];
+  var stepper = document.getElementById("stepper");
+  var panels = document.querySelectorAll("#step-panels .step-panel");
+  STEPS.forEach(function(label, i){
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", function(){ show(i); });
+    stepper.appendChild(b);
+  });
+  function show(i){
+    stepper.querySelectorAll("button").forEach(function(b, j){
+      b.classList.toggle("on", i === j);
+    });
+    panels.forEach(function(p){
+      p.classList.toggle("on", Number(p.getAttribute("data-step")) === i);
+    });
+  }
+  show(0);
+
+  // ---------- simulator ----------
+  var NOW = new Date(Date.UTC(2026, 9, 9, 6, 30)); // 2026-10-09 12:00 IST
+  var IST = "Asia/Kolkata";
+
+  var KINDS = {
+    table:  {label:"Table (managed)", kind:"MANAGED"},
+    st:     {label:"Streaming table", kind:"STREAMING_TABLE"},
+    mv:     {label:"Materialized view", kind:"MATERIALIZED_VIEW"},
+    fn:     {label:"Function (UDF)", kind:"FUNCTION"}
+  };
+  var STATES = {
+    fresh:    {label:"Wrote 6h ago (100 rows)", q:true,  hours:6,      detail:""},
+    zero:     {label:"Wrote 5h ago (0 rows — still counts)", q:true, hours:5, detail:""},
+    stale:    {label:"Wrote 30h ago", q:true, hours:30, detail:"stale"},
+    maintenance:{label:"OPTIMIZE 3h ago (maintenance only)", q:false, hours:3, detail:"none"},
+    future:   {label:"Wrote 2h in the future (clock skew)", q:false, hours:-2, detail:"none"},
+    none:     {label:"No writes in history", q:false, hours:null, detail:"none"},
+    unreadable:{label:"History unreadable (permission)", q:false, hours:null, detail:"unreadable"},
+    stfresh:  {label:"STREAMING UPDATE 10h ago", q:true, hours:10, detail:""},
+    ststale:  {label:"STREAMING UPDATE 30h ago (scheduled, between runs)", q:true, hours:30, detail:"stale"},
+    stgap:    {label:"Last refresh 26 days ago (the gap)", q:true, hours:26*24, detail:"stale"},
+    mvfresh:  {label:"COMPLETED refresh 5h ago", q:true, hours:5, detail:""},
+    mvstale:  {label:"COMPLETED refresh 30h ago", q:true, hours:30, detail:"stale"},
+    fn:       {label:"Function dependency (note)", q:false, hours:null, detail:"fn"}
+  };
+  var STATE_BY_KIND = {
+    table: ["fresh","zero","stale","maintenance","future","none","unreadable"],
+    st:    ["stfresh","ststale","stgap","unreadable"],
+    mv:    ["mvfresh","mvstale","unreadable"],
+    fn:    ["fn"]
+  };
+  var NAMES = ["c.s.t_orders", "c.s.t_payments", "c.s.t_customers"];
+  var DEP_NAMES = ["c.s.t_orders", "c.s.st_events", "c.s.mv_daily"];
+
+  var rowsEl = document.getElementById("simRows");
+  var state = [ {kind:"table", st:"fresh"}, {kind:"st", st:"stfresh"}, {kind:"mv", st:"mvfresh"} ];
+
+  function buildRows(){
+    rowsEl.innerHTML = "";
+    state.forEach(function(cfg, i){
+      var wrap = document.createElement("div");
+      wrap.className = "sim-row";
+      var l1 = document.createElement("label");
+      l1.textContent = "Dependency " + (i+1) + " — " + DEP_NAMES[i];
+      var k = document.createElement("select");
+      Object.keys(KINDS).forEach(function(key){
+        var o = document.createElement("option");
+        o.value = key; o.textContent = KINDS[key].label;
+        if (key === cfg.kind) o.selected = true;
+        k.appendChild(o);
+      });
+      k.addEventListener("change", function(){
+        cfg.kind = k.value;
+        cfg.st = STATE_BY_KIND[k.value][0];
+        buildRows(); run();
+      });
+      var s = document.createElement("select");
+      STATE_BY_KIND[cfg.kind].forEach(function(key){
+        var o = document.createElement("option");
+        o.value = key; o.textContent = STATES[key].label;
+        if (key === cfg.st) o.selected = true;
+        s.appendChild(o);
+      });
+      s.addEventListener("change", function(){ cfg.st = s.value; run(); });
+      var l2 = document.createElement("label");
+      l2.style.marginTop = "6px";
+      l2.textContent = "State";
+      wrap.appendChild(l1); wrap.appendChild(k);
+      wrap.appendChild(l2); wrap.appendChild(s);
+      rowsEl.appendChild(wrap);
+    });
+  }
+
+  function ist(date){
+    // fixed offset zone, no DST: UTC+5:30
+    var t = new Date(date.getTime() + 5.5*3600*1000);
+    var p = function(n){ return String(n).padStart(2,"0"); };
+    return t.getUTCFullYear()+"-"+p(t.getUTCMonth()+1)+"-"+p(t.getUTCDate())+" "+
+           p(t.getUTCHours())+":"+p(t.getUTCMinutes())+" IST";
+  }
+  function humanAge(mins){
+    if (mins < 60) return mins + "m";
+    var h = Math.floor(mins/60), m = mins%60;
+    if (h < 24) return h + "h " + String(m).padStart(2,"0") + "m";
+    var d = Math.floor(h/24), rh = h%24;
+    return d + "d " + rh + "h";
+  }
+
+  function depVerdict(cfg, windowH){
+    var st = STATES[cfg.st];
+    var kind = KINDS[cfg.kind].kind;
+    var name = DEP_NAMES[state.indexOf(cfg)];
+    if (kind === "FUNCTION")
+      return {ok:true, mark:"note", name:name, kind:kind,
+              detail:"function dependency — nothing to refresh", last:null};
+    if (st.detail === "unreadable")
+      return {ok:false, mark:"stale", name:name, kind:kind,
+              detail:"history unreadable (permission)", last:null};
+    if (!st.q || st.hours === null || st.hours < 0)
+      return {ok:false, mark:"stale", name:name, kind:kind,
+              detail:"no qualifying refresh in history", last:null};
+    var last = new Date(NOW.getTime() - st.hours*3600*1000);
+    var fresh = st.hours <= windowH;
+    var mins = Math.max(0, Math.floor(st.hours*60));
+    return {ok:fresh, mark: fresh ? "fresh" : "stale", name:name, kind:kind,
+            last:last, mins:mins,
+            detail: fresh ? "" : "older than the " + windowH + "h window"};
+  }
+
+  function run(){
+    var windowH = Number(document.getElementById("w").value);
+    var deps = state.map(function(cfg){ return depVerdict(cfg, windowH); });
+    var ready = deps.every(function(d){ return d.ok; });
+    var v = document.getElementById("verdict");
+    v.textContent = ready ? "READY" : "BLOCKED";
+    v.className = ready ? "ready" : "blocked";
+
+    var allFn = deps.every(function(d){ return d.kind === "FUNCTION"; });
+    document.getElementById("simBanner").style.display = allFn ? "block" : "none";
+
+    var sorted = deps.slice().sort(function(a,b){
+      if (a.ok !== b.ok) return a.ok ? 1 : -1;   // stale first
+      return a.name.localeCompare(b.name);
+    });
+
+    var L = [];
+    L.push("GATE  " + (ready ? "READY" : "BLOCKED") + "   1 view, window " + windowH + "h, times " + IST);
+    L.push("");
+    L.push("  " + (ready ? "READY" : "BLOCKED").padEnd(8) + "c.s.v");
+    sorted.forEach(function(d){
+      if (d.mark === "note")
+        L.push("      note   " + d.name + "  (" + d.kind + ")  " + d.detail);
+      else if (d.last === null)
+        L.push("      stale  " + d.name + "  (" + d.kind + ")  " + d.detail);
+      else {
+        var line = "      " + d.mark + "  " + d.name + "  (" + d.kind + ")  last refresh " +
+                   ist(d.last) + " (" + humanAge(d.mins) + " ago)";
+        if (d.detail) line += " — " + d.detail;
+        L.push(line);
+      }
+    });
+    L.push("");
+    if (ready) L.push("Every dependency is fresh. The refresh can proceed.");
+    else {
+      L.push("To unblock, refresh:");
+      deps.forEach(function(d, i){
+        if (!d.ok) L.push("  " + d.name + "   (needed by c.s.v)");
+      });
+    }
+    document.getElementById("simReport").textContent = L.join("\n");
+  }
+
+  document.getElementById("w").addEventListener("change", run);
+
+  var PRESETS = {
+    allf:   [ {kind:"table", st:"fresh"}, {kind:"st", st:"stfresh"}, {kind:"mv", st:"mvfresh"} ],
+    stale:  [ {kind:"table", st:"stale"}, {kind:"st", st:"stfresh"}, {kind:"mv", st:"mvfresh"} ],
+    gap:    [ {kind:"table", st:"fresh"}, {kind:"st", st:"stgap"},   {kind:"mv", st:"mvfresh"} ],
+    unread: [ {kind:"table", st:"unreadable"}, {kind:"st", st:"stfresh"}, {kind:"mv", st:"mvfresh"} ],
+    fn:     [ {kind:"fn", st:"fn"}, {kind:"fn", st:"fn"}, {kind:"fn", st:"fn"} ],
+    skew:   [ {kind:"table", st:"future"}, {kind:"st", st:"stfresh"}, {kind:"mv", st:"mvfresh"} ]
+  };
+  document.querySelectorAll("#presets button").forEach(function(b){
+    b.addEventListener("click", function(){
+      var p = PRESETS[b.getAttribute("data-preset")];
+      if (p) { state = p.map(function(x){ return {kind:x.kind, st:x.st}; }); buildRows(); run(); }
+    });
+  });
+
+  buildRows();
+  run();
+
+  // ---------- findings filter ----------
+  document.querySelectorAll("#filters button").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("#filters button").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      var f = b.getAttribute("data-f");
+      document.querySelectorAll("#findings tbody tr").forEach(function(tr){
+        tr.classList.toggle("hidden", f !== "all" && (tr.getAttribute("data-t")||"").indexOf(f) === -1);
+      });
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

@@ -121,6 +121,23 @@ def test_first_qualifying_commit_of_the_day_wins():
     assert times[date(2026, 8, 6)].hour == 4
 
 
+def test_the_first_commit_of_the_day_is_the_finish():
+    """A day with two qualifying commits (04:00 staging, 05:00 final)
+    reports 04:00. This is deliberate: a one-off rerun at 22:00 must not
+    move the schedule. A job that commits twice per run needs a bigger
+    buffer. See README, 'Which commit counts as the finish'."""
+    day = date(2026, 8, 6)
+    commits = [
+        commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "04:00"), 1),
+        commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "05:00"), 2),
+        commit("WRITE", {"mode": "Overwrite"}, {}, f.at("2026-08-06", "22:00"), 3),
+    ]
+    times = finish_times(commits, day, 30, UTC)
+    assert times[day] == f.at("2026-08-06", "04:00"), "the first commit is the finish"
+    assert times[day].hour != 5, "the second commit does not move it"
+    assert times[day].hour != 22, "a rerun at 22:00 does not move it"
+
+
 def test_days_are_local_days_not_utc_days():
     """22:00 UTC is 03:30 next morning IST. The day it lands on is the whole
     point of pinning the timezone."""

@@ -39,7 +39,7 @@ td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
 <pre><code>VIEW   sales_gold.customer_360
        8 dependencies · last 30 days · times IST
 
-       SCHEDULE AT  05:45    safe — every job had finished, on all 30 days
+       SCHEDULE AT  07:00    safe — every job had finished, on all 30 days
        EARLIER      05:20    one job had not finished yet, on 1 of 30 days
 
 DEPENDENCY        RUNS   USUAL   LATEST  DAYS  MISSED
@@ -53,8 +53,8 @@ gold.segments     daily  05:01   05:31   30    0
 gold.ltv          daily  04:55   05:12   30    0
 
 WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)
-  2026-08-17  Mon  06:45   ← sets the safe time
-  2026-08-24  Mon  06:20   ← sets the earlier time
+  2026-08-17  Mon  06:45   ← sets the SCHEDULE AT time
+  2026-08-24  Mon  06:20
   2026-08-10  Mon  06:05
   2026-08-06  Thu  05:31
   ... 26 more
@@ -64,7 +64,7 @@ WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)
 !  1 dependency could not be read:
      ext.crm_sync — not readable as a Delta table (type FOREIGN)</code></pre>
   </div>
-  <p>No confidence tiers, no coverage percentages, no vocabulary anyone has to learn. <strong>"Worst day in 30"</strong> and <strong>"worst but one"</strong> are the same two order statistics from v3 — just said in words a person already knows.</p>
+  <p>No confidence tiers, no coverage percentages, no vocabulary anyone has to learn. <strong>"Worst day in 30"</strong> and <strong>"the typical day"</strong> are the two numbers the report gives — just said in words a person already knows.</p>
   <p>The weekly table isn't a classifier output buried in a report. It's a row saying <code>Mondays</code>, which anyone reads in half a second.</p>
 </section>
 
@@ -121,9 +121,9 @@ def refreshed_today(t):
       <thead><tr><th>Deleted</th><th>Replaced by</th><th>Add back when</th></tr></thead>
       <tbody>
         <tr><td class="cut">8-class cadence classifier</td><td>A "refreshes" column showing observed days</td><td>Never — a human reads this faster than a classifier decides it</td></tr>
-        <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>A table refreshes many times daily and you need a later slot</td></tr>
+        <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>Already back (0.6.0)</td></tr>
         <tr><td class="cut">Cycle attribution + cutover detection</td><td>Calendar day</td><td>A pipeline genuinely straddles midnight — then set the day boundary by hand</td></tr>
-        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "worst but one"</td><td>You have 100+ days of history, which you won't for a year</td></tr>
+        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "typical"</td><td>Already back (0.6.0)</td></tr>
         <tr><td class="cut">Changepoint detection</td><td>The 30 days are on screen</td><td>You automate the check and no human reads the output</td></tr>
         <tr><td class="cut">Tolerance bands, outlier rules</td><td><em>Nothing — this row was wrong.</em> The gate no longer replaces the outlier check: the gate guards the run, the analyzer still names the day pinning <code>safe</code></td><td>Already back</td></tr>
         <tr><td class="cut">Timing/reliability split</td><td>A "missed" column</td><td>Never</td></tr>

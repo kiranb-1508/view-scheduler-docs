@@ -5,7 +5,8 @@ The clock is pinned with `now=` so the rolling window is deterministic.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -15,8 +16,26 @@ from view_scheduler.config import Config
 from view_scheduler.gate import Dependency, GateResult, ViewResult, can_refresh
 
 UTC = timezone.utc
+IST = ZoneInfo("Asia/Kolkata")
 NOW = f.at("2026-08-06", "12:00")          # noon UTC
 CONFIG = Config(timezone="UTC")
+
+
+class RecordingWorkspace(FakeWorkspace):
+    """A FakeWorkspace that also keeps every SQL statement it was given.
+
+    `FakeWorkspace.sql_calls` stores only the target, so it cannot show the
+    statement text. This subclass records the statement too, which the SQL
+    window test needs. Same pattern as tests/test_client.py.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.statements: list[str] = []
+
+    def sql(self, statement, target):
+        self.statements.append(statement)
+        return super().sql(statement, target)
 
 
 def ago(hours):
@@ -39,10 +58,10 @@ def streaming_update(hours_ago, version=0):
                              {}, {"numOutputRows": "50"})
 
 
-def run(views, ws, **kwargs):
+def run(views, ws, config=CONFIG, **kwargs):
     kwargs.setdefault("now", NOW)
     kwargs.setdefault("quiet", True)
-    return can_refresh(views, ws, CONFIG, **kwargs)
+    return can_refresh(views, ws, config, **kwargs)
 
 
 def dep(result, view=0, name=None):
@@ -56,6 +75,53 @@ def dep(result, view=0, name=None):
 def view_of(names):
     return {"c.s.v": f.uc_view("c.s.v", names),
             **{n: f.uc_table(n) for n in names}}
+
+
+def monday_writes(weeks, last_hours=72):
+    """`weeks` Monday writes at noon UTC, ending `last_hours` hours before NOW.
+
+    Two of them clear the trust guard: Monday is seen twice.
+    """
+    return [write(last_hours + 168 * i) for i in range(weeks)]
+
+
+# --- cadence-aware freshness -------------------------------------------------
+
+IST_CONFIG = Config(timezone="Asia/Kolkata")
+MON_MORNING = datetime(2026, 8, 10, 6, 0, tzinfo=IST)     # a Monday
+TUE_MORNING = datetime(2026, 8, 11, 6, 0, tzinfo=IST)
+WED_MORNING = datetime(2026, 8, 12, 6, 0, tzinfo=IST)
+
+
+def ist_at(day, hhmm):
+    """An aware datetime at hhmm Asia/Kolkata on an ISO date."""
+    return datetime.fromisoformat(f"{day}T{hhmm}:00").replace(tzinfo=IST)
+
+
+def write_at(version, day, hhmm="04:00"):
+    return f.raw_history_row(version, ist_at(day, hhmm), "WRITE",
+                             {"mode": "Overwrite"}, {"numOutputRows": "10"})
+
+
+def writes_on(days, hhmm="04:00"):
+    """One WRITE at hhmm on each local day, oldest version first."""
+    return [write_at(i, d.isoformat(), hhmm) for i, d in enumerate(days)]
+
+
+def weekdays_from(start, count):
+    """`count` Monday-to-Friday days, starting on `start`."""
+    out, day = [], start
+    while len(out) < count:
+        if day.weekday() < 5:
+            out.append(day)
+        day += timedelta(days=1)
+    return out
+
+
+#: Mon 2026-07-20 through Fri 2026-08-07: three working weeks.
+THREE_WEEKS = weekdays_from(date(2026, 7, 20), 15)
+#: Four Mondays, ending Mon 2026-08-03. Four fits a default 30-day window.
+MONDAYS = [date(2026, 8, 3) - timedelta(weeks=i) for i in range(4)]
 
 
 # --- the happy path ----------------------------------------------------------
@@ -294,6 +360,35 @@ def test_naive_now_is_localised_to_the_config_timezone():
     assert result.ready is True
 
 
+# --- the bounded history read ------------------------------------------------
+
+def test_history_read_is_bounded_to_the_cadence_window():
+    """The gate reads only the window it needs, like the advisor does.
+
+    `days_history` days of history decide the cadence, so the SQL must carry a
+    cutoff at the start of the local day `days_history` days before `now`.
+    """
+    ws = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                            history={"c.s.t": [write(8)]})
+    run("c.s.v", ws)
+
+    cutoff_day = NOW.date() - timedelta(days=CONFIG.days_history)
+    expected = int(datetime.combine(cutoff_day, time.min,
+                                    tzinfo=CONFIG.tz).timestamp())
+    assert f"WHERE unix_timestamp(timestamp) >= {expected}" in ws.statements[-1]
+
+
+def test_bounded_history_read_keeps_the_verdict():
+    """The SQL cutoff must not change the verdict for the same fixture data."""
+    fresh = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                               history={"c.s.t": [write(8)]})
+    assert run("c.s.v", fresh).ready is True
+
+    stale = RecordingWorkspace(tables=view_of(["c.s.t"]),
+                               history={"c.s.t": [write(56)]})
+    assert run("c.s.v", stale).ready is False
+
+
 # --- lists, caching, printing ------------------------------------------------
 
 def test_list_gives_per_view_detail_and_one_overall_flag():
@@ -403,19 +498,21 @@ def test_golden_report():
 def test_ignore_non_daily_passes_a_weekly_table_and_still_blocks_a_daily_one():
     """A Monday table 3 days old is fresh for its own schedule.
 
-    The daily table wrote 40 hours ago, which is stale for a 24-hour window, so
-    it still blocks. The gate does not widen the window for every table.
+    The trust guard asks only that every seen weekday appear twice, so four
+    Mondays in the default 30-day window are enough. The daily table wrote 40
+    hours ago, which is stale for a 24-hour window, so it still blocks. The
+    gate does not widen the window for every table.
     """
     ws = FakeWorkspace(
         tables=view_of(["c.s.weekly", "c.s.daily"]),
-        history={"c.s.weekly": [write(72)],
+        history={"c.s.weekly": monday_writes(4),
                  "c.s.daily": [write(40 + 24 * i) for i in range(30)]})
-    result = run("c.s.v", ws, ignore_non_daily=True)
+    result = run("c.s.v", ws, CONFIG, ignore_non_daily=True)
     weekly = dep(result, name="weekly")
     assert weekly.ok is True
     # `_weekday_label` names one weekday with an "s" ("Mons", "Thus").
     assert weekly.cadence == "Mons"
-    assert weekly.detail == "schedule: Mons"
+    assert weekly.detail == "schedule: Mons — window 192h"
     assert "schedule: Mons" in str(result)
     daily = dep(result, name="daily")
     assert daily.ok is False
@@ -423,14 +520,19 @@ def test_ignore_non_daily_passes_a_weekly_table_and_still_blocks_a_daily_one():
     assert result.ready is False
 
 
-def test_ignore_non_daily_blocks_a_weekly_table_older_than_168h():
+def test_a_weekly_table_older_than_its_window_blocks():
+    """A Mondays table 240 hours old is past its own window.
+
+    The window is computed from the observed schedule, so it is 192 hours,
+    not the 168-hour constant the gate used before.
+    """
     ws = FakeWorkspace(tables=view_of(["c.s.weekly"]),
-                       history={"c.s.weekly": [write(240)]})   # last Monday
-    result = run("c.s.v", ws, ignore_non_daily=True)
+                       history={"c.s.weekly": monday_writes(3, last_hours=240)})
+    result = run("c.s.v", ws, CONFIG, ignore_non_daily=True)
     assert result.ready is False
     entry = dep(result)
     assert entry.cadence == "Mons"
-    assert entry.detail == "schedule: Mons — older than the 168h window"
+    assert entry.detail == "schedule: Mons — older than the 192h window"
 
 
 def test_ignore_non_daily_passes_a_static_table_as_a_note():
@@ -503,3 +605,135 @@ def test_to_dict_reports_cadence_and_multi_daily():
     assert entry["cadence"] == "Thus"
     assert entry["multi_daily"] is True
     json.dumps(payload)   # must not raise
+
+
+# --- a table checked against its own schedule --------------------------------
+
+def test_mon_to_fri_table_is_fresh_on_monday_morning():
+    """A Mon-Fri table wrote last on Friday, 74 hours ago. Its own schedule
+    gives it (3 + 1) * 24 = 96 hours, so Monday morning is fresh."""
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(THREE_WEEKS)})
+    result = run("c.s.v", ws, IST_CONFIG, now=MON_MORNING)
+    assert result.ready is True
+    assert dep(result).detail == "schedule: Mon,Tue,Wed,Thu,Fri — window 96h"
+
+
+def test_a_missed_friday_is_caught_on_monday():
+    """The same table, but the last Friday never wrote. The last write is 98
+    hours old, past the 96-hour window. One missed run still blocks."""
+    missed = [d for d in THREE_WEEKS if d != date(2026, 8, 7)]
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(missed)})
+    result = run("c.s.v", ws, IST_CONFIG, now=MON_MORNING)
+    assert result.ready is False
+    assert dep(result).detail == "schedule: Mon,Tue,Wed,Thu,Fri — older than the 96h window"
+
+
+def test_a_mondays_table_gets_its_window_with_default_history():
+    """Four Mondays in the default 30-day window earn the 192-hour schedule.
+
+    The trust guard asks only that every seen weekday appear twice, so a
+    weekly table needs no widened history. The table wrote last Monday, so it
+    is fresh before this Monday runs.
+    """
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(MONDAYS)})
+    result = run("c.s.v", ws, Config(), now=MON_MORNING)
+    assert result.ready is True
+    assert dep(result).detail == "schedule: Mons — window 192h"
+
+
+def test_a_missed_monday_is_caught_on_tuesday():
+    """This Monday never wrote. On Tuesday the last write is 194 hours old,
+    past the 192-hour window. The default 30-day history is enough."""
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(MONDAYS)})
+    result = run("c.s.v", ws, Config(), now=TUE_MORNING)
+    assert result.ready is False
+    assert dep(result).detail == "schedule: Mons — older than the 192h window"
+
+
+def test_a_sparse_table_gets_no_cadence_extension():
+    """Three run days is thin evidence. The trust guard keeps the strict
+    daily window, so a 30-hour-old write blocks."""
+    sparse = [date(2026, 8, 9), date(2026, 8, 10), date(2026, 8, 11)]
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(sparse)})
+    result = run("c.s.v", ws, IST_CONFIG,
+                 now=ist_at("2026-08-12", "10:00"))
+    assert result.ready is False
+    assert dep(result).detail == "older than the 24h window"
+
+
+def test_a_sparse_all_weekdays_table_gets_no_cadence_extension():
+    """A table seen on all seven weekdays is a daily table with outages.
+
+    It wrote on every weekday, but a 10-day gap leaves coverage below 0.9 of
+    its own span. Its label is not "daily", yet it keeps the daily window: a
+    30-hour-old write blocks. Every weekday here appears at least twice, so
+    only the all-seven rule can stop the extension.
+    """
+    before = [date(2026, 6, d) for d in range(2, 12)]      # Jun 2 .. Jun 11
+    after = [date(2026, 6, d) for d in range(22, 31)]      # Jun 22 .. Jun 30
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(before + after)})
+    result = run("c.s.v", ws, IST_CONFIG, now=ist_at("2026-07-01", "10:00"))
+    assert result.ready is False
+    assert dep(result).cadence == "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
+    assert dep(result).detail == "older than the 24h window"
+
+
+def test_one_weekday_seen_once_gets_no_cadence_extension():
+    """Twelve run days, but Tuesday appears once. The trust guard fails
+    closed, so the Tuesday write 26 hours ago blocks on the daily window."""
+    seen_once = [
+        date(2026, 8, 11),                                       # the only Tuesday
+        date(2026, 8, 3), date(2026, 7, 27), date(2026, 7, 20),  # Mondays
+        date(2026, 8, 5), date(2026, 7, 29), date(2026, 7, 22),  # Wednesdays
+        date(2026, 8, 6), date(2026, 7, 30), date(2026, 7, 23),  # Thursdays
+        date(2026, 7, 24), date(2026, 7, 31),                    # Fridays
+    ]
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]),
+                       history={"c.s.t": writes_on(seen_once)})
+    result = run("c.s.v", ws, IST_CONFIG, now=WED_MORNING)
+    assert result.ready is False
+    assert dep(result).detail == "older than the 24h window"
+
+
+def test_mode_weekly_forces_the_weekly_gap():
+    """A table marked weekly gets (7 + 1) * 24 = 192 hours, whatever its
+    observed pattern. Plain, the same history is checked daily and blocks."""
+    missed = [d for d in THREE_WEEKS if d != date(2026, 8, 7)]
+    history = {"c.s.t": writes_on(missed)}
+
+    plain = FakeWorkspace(tables=view_of(["c.s.t"]), history=history)
+    assert run("c.s.v", plain, IST_CONFIG, now=MON_MORNING).ready is False
+
+    table = {**f.uc_table("c.s.t"),
+             "properties": {"view_scheduler.mode": "weekly"}}
+    marked = FakeWorkspace(
+        tables={"c.s.v": f.uc_view("c.s.v", ["c.s.t"]), "c.s.t": table},
+        history=history)
+    result = run("c.s.v", marked, IST_CONFIG, now=MON_MORNING)
+    assert result.ready is True
+    assert "window 192h" in dep(result).detail
+
+
+def test_check_multi_daily_shortens_the_computed_window():
+    """A Mon-Fri table that runs twice a day earns 96 hours. The multi-daily
+    rule then divides it: 96 // 2 = 48 hours."""
+    rows = [write_at(v, d.isoformat(), hhmm)
+            for v, (d, hhmm) in enumerate(
+                (day, hhmm) for day in THREE_WEEKS
+                for hhmm in ("04:00", "05:00"))]
+    ws = FakeWorkspace(tables=view_of(["c.s.t"]), history={"c.s.t": rows})
+
+    assert run("c.s.v", ws, IST_CONFIG, now=MON_MORNING).ready is True
+
+    result = run("c.s.v", ws, IST_CONFIG, now=MON_MORNING,
+                 check_multi_daily=True)
+    assert result.ready is False
+    assert dep(result).multi_daily is True
+    assert dep(result).detail == \
+        "multi-daily (2x/day) — older than the 48h window"

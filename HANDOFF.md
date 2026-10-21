@@ -203,7 +203,7 @@ from view_scheduler import advise
 
 advice = advise("sales.gold.customer_360")   # WAREHOUSE_ID from the env
 advice.safe_time      # datetime.time(6, 25)  or None
-advice.earlier_time   # datetime.time(5, 45)  or None
+advice.earlier_time   # datetime.time(4, 25)  or None
 advice.next_day       # True when the (+1 day) marker applies
 advice.dependencies   # one row per upstream job
 advice.to_dict()      # JSON
@@ -385,7 +385,20 @@ These were verified against a live workspace. They are not opinions.
 9. **`operationMetrics` is a wide JSON column.** The gate classifies commits
    only, so it does not need it. Do not fetch it for the gate.
 
-10. **Classify a commit exactly like this, in this order:**
+10. **A fixed daily window blocks a Mon-Fri table every Monday.** A table that
+    writes Monday to Friday last wrote on Friday. On Monday morning that write
+    is about 74 hours old, so a 24-hour window blocks the view — every Monday,
+    forever. The gate now checks each table against its own observed schedule.
+    The window is one plus the longest gap between run weekdays, times
+    `fresh_hours`: a Mon-Fri table gets 96 hours and a Mondays-only table gets
+    192. The gate extends the window only for a trusted table — no weekday
+    seen just once, and the table does not run on all seven weekdays. A table
+    seen on all seven weekdays is a daily table with outages, so it keeps the
+    daily window. A thin history keeps the daily window too, so a new table
+    cannot relax its own check. A missed run is still caught within one day.
+    Revised 2026-10-16.
+
+11. **Classify a commit exactly like this, in this order:**
 
     | Step | Rule | Class |
     |---|---|---|
@@ -407,6 +420,17 @@ These were verified against a live workspace. They are not opinions.
     - **A zero-row write still counts as a refresh.** A full replace that
       produced no rows still ran. So did a zero-row append.
 
+12. **The first qualifying commit of the day is the finish.**
+    `DESCRIBE HISTORY` gives one moment per commit. It does not say when a job
+    started or ended. So the advisor reads the first qualifying commit of each
+    local day as the finish. This is right for a rerun: a one-off rerun at
+    22:00 must not move the schedule, and it does not. It is wrong for a job
+    that commits twice per run: a 04:00 staging write and a 05:00 final write
+    report a 04:00 finish, though the table wrote for one more hour. The code
+    cannot tell the two cases apart. Raise `--buffer` when a job commits twice
+    per run. A table that commits twice on a typical day is flagged
+    `multi_daily`.
+
 ---
 
 ## 11. Decisions already made — do not relitigate
@@ -418,8 +442,9 @@ The owner was interviewed in depth. These are settled:
 | Base code | The existing V1 package, not a rewrite |
 | I/O | Reuse the existing `Workspace` seam |
 | Freshness | Rolling hours, not a calendar day |
-| Window default | 24 hours |
-| Window scope | One value per call |
+| Window default | 24 hours for a daily table |
+| Window scope | One `fresh_hours` per call. Each table earns its own window from its observed schedule, under a fail-closed trust guard. (reversed 2026-10-16; was one window for every table) |
+| Cadence checking | On by default. `ignore_non_daily` now covers only a table with no write in history. (reversed 2026-10-16; cadence checking was opt-in) |
 | What qualifies as a write | The V1 rule above, including zero rows |
 | Walk depth | Recurse views, stop at tables and MVs |
 | Streaming | Checked from history (reversed 2026-10-09; was "always fresh") |
@@ -532,7 +557,12 @@ if you are careless.
 - No CLI subcommand for the gate.
 - No per-view window.
 - No automatic refresh.
-- No concurrency or 429 backoff in the walker (still serial).
+- No concurrency in the walker (still serial). A transient read is retried
+  (reversed 2026-10-16; the walker had no 429 backoff before). The retry covers
+  transport errors and statement-state errors: any statement state other than
+  `SUCCEEDED` is raised inside the retried call. A real SDK error carries
+  `error_code` and `retry_after_secs`; it does not carry `status_code` or
+  `retry_after`, so the classifier reads both shapes.
 - No per-table retention windows.
 - No concurrency in the comparison tooling.
 

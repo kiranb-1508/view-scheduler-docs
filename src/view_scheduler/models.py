@@ -19,10 +19,17 @@ class Commit:
 
 @dataclass(frozen=True)
 class Skipped:
-    """A dependency that could not be resolved, and why. Never dropped silently."""
+    """A dependency that could not be resolved, and why. Never dropped silently.
+
+    `blocks` says whether the missing evidence invalidates a recommended time.
+    A table we could not read does — a time computed without one input is not a
+    safe time. A function dependency does not: a SQL UDF has no refresh to wait
+    for, so it never removes the headline.
+    """
 
     name: str
     reason: str
+    blocks: bool = True
 
 
 @dataclass(frozen=True)

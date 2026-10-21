@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -91,11 +92,16 @@ class Workspace:
     # --- Unity Catalog -------------------------------------------------------
 
     def get_table(self, full_name: str) -> dict:
-        """Raw GET for one table's metadata, including view_dependencies."""
+        """Raw GET for one table's metadata, including view_dependencies.
+
+        The GET is retried on a passing failure and fails closed on a lasting
+        one.
+        """
         path = quote(full_name, safe=".")
+        url = f"/api/2.1/unity-catalog/tables/{path}"
         with obs.call("uc.tables.get", full_name):
-            return self.w.api_client.do(
-                "GET", f"/api/2.1/unity-catalog/tables/{path}")
+            return with_retry(lambda: self.w.api_client.do("GET", url),
+                              kind="uc.tables.get", target=full_name)
 
     # --- SQL -----------------------------------------------------------------
 
@@ -108,7 +114,9 @@ class Workspace:
 
         The statement path also follows result chunking to the end and refuses
         a truncated result, so a caller never silently sees only the first
-        page of a large result.
+        page of a large result. Each warehouse call — the submission and every
+        chunk fetch — is retried on a passing failure. The Spark path is not
+        retried: it is local compute, so a failure there is real.
         """
         if self.spark is not None:
             with obs.call("spark.sql", target):
@@ -122,17 +130,26 @@ class Workspace:
             raise ValueError("warehouse_id is required for SQL calls")
 
         with obs.call("sql", target):
-            resp = self.w.statement_execution.execute_statement(
-                warehouse_id=self.warehouse_id,
-                statement=statement,
-                wait_timeout="50s",
-                on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
-            )
-            state = resp.status.state.value if resp.status and resp.status.state else "?"
-            if state != "SUCCEEDED":
-                message = (resp.status.error.message
-                           if resp.status and resp.status.error else state)
-                raise RuntimeError(message)
+            def submit():
+                resp = self.w.statement_execution.execute_statement(
+                    warehouse_id=self.warehouse_id,
+                    statement=statement,
+                    wait_timeout="50s",
+                    on_wait_timeout=(
+                        ExecuteStatementRequestOnWaitTimeout.CANCEL),
+                )
+                state = (resp.status.state.value
+                         if resp.status and resp.status.state else "?")
+                if state != "SUCCEEDED":
+                    message = (resp.status.error.message
+                               if resp.status and resp.status.error else state)
+                    raise RuntimeError(message)
+                return resp
+
+            # The state check sits inside the retried call, so a FAILED,
+            # TIMED_OUT, or CANCELED state flows through `is_transient`. A
+            # transient state retries; a permanent one raises at once.
+            resp = with_retry(submit, kind="sql", target=target)
 
             if resp.manifest and resp.manifest.truncated:
                 raise RuntimeError(
@@ -143,8 +160,11 @@ class Workspace:
             rows = list((resp.result.data_array if resp.result else None) or [])
             chunk = resp.result.next_chunk_index if resp.result else None
             while chunk is not None:
-                page = self.w.statement_execution.get_statement_result_chunk_n(
-                    resp.statement_id, chunk)
+                page = with_retry(
+                    lambda c=chunk: (
+                        self.w.statement_execution
+                        .get_statement_result_chunk_n(resp.statement_id, c)),
+                    kind="sql", target=target)
                 rows.extend(page.data_array or [])
                 chunk = page.next_chunk_index
 
@@ -167,6 +187,97 @@ def failure_category(exc: Exception) -> str:
     if "expect_table_not_view" in text:
         return "mv_no_history"
     return "other"
+
+
+#: The HTTP statuses that mark a passing failure. A retry can clear each one.
+_TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
+
+#: The words that mark a passing failure when the error code is absent or
+#: unknown.
+_TRANSIENT_WORDS = ("rate limit", "temporarily unavailable", "connection",
+                    "timed out", "timeout", "canceled", "too many requests",
+                    "the service is currently unavailable")
+
+#: The SDK `error_code` values that mark a passing failure. The real
+#: databricks-sdk error carries `error_code` (a string), not `status_code`.
+_TRANSIENT_ERROR_CODES = frozenset({
+    "ABORTED", "DEADLINE_EXCEEDED", "INTERNAL_ERROR", "REQUEST_LIMIT_EXCEEDED",
+    "RESOURCE_EXHAUSTED", "SERVICE_UNAVAILABLE", "TEMPORARILY_UNAVAILABLE",
+    "TOO_MANY_REQUESTS", "UNAVAILABLE",
+})
+
+#: The wait between attempts. Tests replace this with a recorder, so no test
+#: waits for real.
+_sleep = time.sleep
+
+
+def is_transient(exc: Exception) -> bool:
+    """Say whether a failed read is worth one more attempt.
+
+    The status code decides first, when the exception carries one. The SDK
+    `error_code` decides second: a known passing code retries, and an unknown
+    one falls through to the words. The error text decides last. A permission
+    error, a missing object, a SQL syntax error, and the materialized-view
+    rejection are all permanent. The caller must fail closed on each of them at
+    once.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        try:
+            return int(status) in _TRANSIENT_STATUS
+        except (TypeError, ValueError):
+            return False
+    code = getattr(exc, "error_code", None)
+    if code is not None and str(code).strip().upper() in _TRANSIENT_ERROR_CODES:
+        return True
+    text = str(exc).lower()
+    if "expect_table_not_view" in text:
+        return False
+    return any(word in text for word in _TRANSIENT_WORDS)
+
+
+def _retry_wait(exc: Exception, computed: float) -> float:
+    """The larger of the exception's retry-after value and the computed wait.
+
+    A retry-after value is advisory; the computed wait is the floor. An
+    unreadable or absent value leaves the computed wait in place. The real SDK
+    error names the value `retry_after_secs`; the other names are fallbacks.
+    """
+    for name in ("retry_after_secs", "retry_after", "retry_after_seconds"):
+        value = getattr(exc, name, None)
+        if value is None:
+            continue
+        try:
+            return max(computed, float(value))
+        except (TypeError, ValueError):
+            continue
+    return computed
+
+
+def with_retry(fn, *, kind: str, target: str, attempts: int = 3,
+               sleep=None):
+    """Call `fn`. Retry a passing failure. Give up on a lasting one.
+
+    Three attempts in total. The waits are 1.0s, then 2.0s, with no jitter, so
+    a test can pin every wait. A permanent failure raises at once, with no
+    retry. `sleep` is injectable; a test passes a recorder and never waits.
+
+    This helper is for reads only. Never use it to wrap a write.
+    """
+    if sleep is None:
+        sleep = _sleep
+    wait = 1.0
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt >= attempts or not is_transient(exc):
+                raise
+            pause = _retry_wait(exc, wait)
+            obs.retry(kind, target, attempt, pause,
+                      f"{type(exc).__name__}: {exc}")
+            sleep(pause)
+            wait *= 2
 
 
 def parse_json_field(value: Any) -> dict | None:

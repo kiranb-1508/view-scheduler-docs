@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 from .client import Workspace, failure_category, read_commits
@@ -37,7 +38,24 @@ def collect_history(view: str, ws: Workspace, config: Config,
         histories.append(summarize(table.name, commits, today, config.days_history,
                                    config.tz))
 
-    return recommend(histories, config.buffer_min), histories, skipped
+    result = recommend(histories, config.buffer_min)
+    if any(item.blocks for item in skipped):
+        # A time computed without one input is not a safe time. Withhold every
+        # suggested time, but keep the rows and the day-by-day evidence so the
+        # report still shows what we could read. `blocks=False` notes (function
+        # dependencies) never reach here.
+        result = replace(
+            result,
+            safe=None,
+            earlier=None,
+            usual=None,
+            safe_without_outliers=None,
+            safe_next_day=False,
+            earlier_next_day=False,
+            safe_without_outliers_next_day=False,
+            usual_next_day=False,
+        )
+    return result, histories, skipped
 
 
 collect = collect_history
