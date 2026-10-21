@@ -558,7 +558,11 @@ if you are careless.
 - No per-view window.
 - No automatic refresh.
 - No concurrency in the walker (still serial). A transient read is retried
-  (reversed 2026-10-16; the walker had no 429 backoff before).
+  (reversed 2026-10-16; the walker had no 429 backoff before). The retry covers
+  transport errors and statement-state errors: any statement state other than
+  `SUCCEEDED` is raised inside the retried call. A real SDK error carries
+  `error_code` and `retry_after_secs`; it does not carry `status_code` or
+  `retry_after`, so the classifier reads both shapes.
 - No per-table retention windows.
 - No concurrency in the comparison tooling.
 

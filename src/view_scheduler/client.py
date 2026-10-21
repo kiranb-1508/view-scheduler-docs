@@ -130,20 +130,26 @@ class Workspace:
             raise ValueError("warehouse_id is required for SQL calls")
 
         with obs.call("sql", target):
-            resp = with_retry(
-                lambda: self.w.statement_execution.execute_statement(
+            def submit():
+                resp = self.w.statement_execution.execute_statement(
                     warehouse_id=self.warehouse_id,
                     statement=statement,
                     wait_timeout="50s",
                     on_wait_timeout=(
                         ExecuteStatementRequestOnWaitTimeout.CANCEL),
-                ),
-                kind="sql", target=target)
-            state = resp.status.state.value if resp.status and resp.status.state else "?"
-            if state != "SUCCEEDED":
-                message = (resp.status.error.message
-                           if resp.status and resp.status.error else state)
-                raise RuntimeError(message)
+                )
+                state = (resp.status.state.value
+                         if resp.status and resp.status.state else "?")
+                if state != "SUCCEEDED":
+                    message = (resp.status.error.message
+                               if resp.status and resp.status.error else state)
+                    raise RuntimeError(message)
+                return resp
+
+            # The state check sits inside the retried call, so a FAILED,
+            # TIMED_OUT, or CANCELED state flows through `is_transient`. A
+            # transient state retries; a permanent one raises at once.
+            resp = with_retry(submit, kind="sql", target=target)
 
             if resp.manifest and resp.manifest.truncated:
                 raise RuntimeError(
@@ -186,9 +192,19 @@ def failure_category(exc: Exception) -> str:
 #: The HTTP statuses that mark a passing failure. A retry can clear each one.
 _TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 
-#: The words that mark a passing failure when no status code is present.
+#: The words that mark a passing failure when the error code is absent or
+#: unknown.
 _TRANSIENT_WORDS = ("rate limit", "temporarily unavailable", "connection",
-                    "timed out", "timeout", "canceled")
+                    "timed out", "timeout", "canceled", "too many requests",
+                    "the service is currently unavailable")
+
+#: The SDK `error_code` values that mark a passing failure. The real
+#: databricks-sdk error carries `error_code` (a string), not `status_code`.
+_TRANSIENT_ERROR_CODES = frozenset({
+    "ABORTED", "DEADLINE_EXCEEDED", "INTERNAL_ERROR", "REQUEST_LIMIT_EXCEEDED",
+    "RESOURCE_EXHAUSTED", "SERVICE_UNAVAILABLE", "TEMPORARILY_UNAVAILABLE",
+    "TOO_MANY_REQUESTS", "UNAVAILABLE",
+})
 
 #: The wait between attempts. Tests replace this with a recorder, so no test
 #: waits for real.
@@ -198,10 +214,12 @@ _sleep = time.sleep
 def is_transient(exc: Exception) -> bool:
     """Say whether a failed read is worth one more attempt.
 
-    The status code decides when the exception carries one. The error text
-    decides only when there is no status code. A permission error, a missing
-    object, a SQL syntax error, and the materialized-view rejection are all
-    permanent. The caller must fail closed on each of them at once.
+    The status code decides first, when the exception carries one. The SDK
+    `error_code` decides second: a known passing code retries, and an unknown
+    one falls through to the words. The error text decides last. A permission
+    error, a missing object, a SQL syntax error, and the materialized-view
+    rejection are all permanent. The caller must fail closed on each of them at
+    once.
     """
     status = getattr(exc, "status_code", None)
     if status is not None:
@@ -209,6 +227,9 @@ def is_transient(exc: Exception) -> bool:
             return int(status) in _TRANSIENT_STATUS
         except (TypeError, ValueError):
             return False
+    code = getattr(exc, "error_code", None)
+    if code is not None and str(code).strip().upper() in _TRANSIENT_ERROR_CODES:
+        return True
     text = str(exc).lower()
     if "expect_table_not_view" in text:
         return False
@@ -219,9 +240,10 @@ def _retry_wait(exc: Exception, computed: float) -> float:
     """The larger of the exception's retry-after value and the computed wait.
 
     A retry-after value is advisory; the computed wait is the floor. An
-    unreadable or absent value leaves the computed wait in place.
+    unreadable or absent value leaves the computed wait in place. The real SDK
+    error names the value `retry_after_secs`; the other names are fallbacks.
     """
-    for name in ("retry_after", "retry_after_seconds", "Retry-After"):
+    for name in ("retry_after_secs", "retry_after", "retry_after_seconds"):
         value = getattr(exc, name, None)
         if value is None:
             continue

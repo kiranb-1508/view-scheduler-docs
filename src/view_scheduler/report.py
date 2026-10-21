@@ -78,9 +78,10 @@ def render(view: str, result: Recommendation, skipped: Sequence[Skipped],
             lines.append(
                 f"       NO TIME TO SUGGEST — "
                 f"{_plural(len(blocking), 'dependency')} could not be read.")
+            verb = "was" if len(result.rows) == 1 else "were"
             lines.append(
                 f"       The times below cover only the "
-                f"{_plural(len(result.rows), 'dependency')} that were read.")
+                f"{_plural(len(result.rows), 'dependency')} that {verb} read.")
         else:
             lines.append("       NO TIME TO SUGGEST — there is no day where every "
                          "job had finished.")
@@ -202,10 +203,19 @@ def warnings(result: Recommendation, skipped: Sequence[Skipped]) -> list[str]:
                    f"yesterday's data.")
 
     if skipped:
-        word = "dependency" if len(skipped) == 1 else "dependencies"
-        out.append(f"!  {len(skipped)} {word} could not be read:")
-        for item in skipped:
-            out.append(f"     {item.name} — {item.reason}")
+        blocking = [item for item in skipped if item.blocks]
+        notes = [item for item in skipped if not item.blocks]
+        if blocking:
+            out.append(f"!  {_plural(len(blocking), 'dependency')} "
+                       f"could not be read:")
+            for item in blocking:
+                out.append(f"     {item.name} — {item.reason}")
+        if notes:
+            verb = "needs" if len(notes) == 1 else "need"
+            out.append(f"!  {_plural(len(notes), 'dependency')} {verb} "
+                       f"no refresh:")
+            for item in notes:
+                out.append(f"     {item.name} — {item.reason}")
 
     if result.n_days and result.n_days < 10:
         starved = min((r for r in result.rows), key=lambda r: r.observed_days,

@@ -164,6 +164,19 @@ class FakeHttpError(Exception):
         self.retry_after = retry_after
 
 
+class FakeSdkError(Exception):
+    """Shaped like the real databricks-sdk `DatabricksError`.
+
+    The real error carries `error_code` (a string) and `retry_after_secs` (an
+    int). It carries no `status_code` and no `retry_after`.
+    """
+
+    def __init__(self, message, *, error_code=None, retry_after_secs=None):
+        super().__init__(message)
+        self.error_code = error_code
+        self.retry_after_secs = retry_after_secs
+
+
 @pytest.mark.parametrize("exc,expected", [
     # A transient HTTP status: worth a retry.
     (FakeHttpError("x", status_code=429), True),
@@ -178,6 +191,17 @@ class FakeHttpError(Exception):
     (RuntimeError("the request timed out"), True),
     (RuntimeError("wait timeout"), True),
     (RuntimeError("the statement was canceled"), True),
+    (RuntimeError("too many requests"), True),
+    (RuntimeError("the service is currently unavailable"), True),
+    # The real SDK error carries `error_code`, not `status_code`.
+    (FakeSdkError("too many requests", error_code="RESOURCE_EXHAUSTED"), True),
+    (FakeSdkError("quota exceeded for this workspace",
+                  error_code="REQUEST_LIMIT_EXCEEDED"), True),
+    (FakeSdkError("the service is currently unavailable",
+                  error_code="UNAVAILABLE"), True),
+    (FakeSdkError("permission denied", error_code="PERMISSION_DENIED"), False),
+    (FakeSdkError("unexpected failure",
+                  error_code="INVALID_PARAMETER_VALUE"), False),
     # A permanent failure: fail closed, at once.
     (FakeHttpError("x", status_code=401), False),
     (FakeHttpError("x", status_code=403), False),
@@ -195,6 +219,13 @@ class FakeHttpError(Exception):
 ])
 def test_is_transient_follows_the_decision_table(exc, expected):
     assert client.is_transient(exc) is expected
+
+
+def test_status_code_still_wins_over_error_code():
+    """The status-first check stays first, for exception types that carry one."""
+    exc = FakeSdkError("connection reset", error_code="RESOURCE_EXHAUSTED")
+    exc.status_code = 403
+    assert client.is_transient(exc) is False
 
 
 # --- with_retry: three attempts, fail closed at once --------------------------
@@ -287,6 +318,47 @@ def test_a_longer_retry_after_value_wins(monkeypatch):
     assert recorder.waits == [5.0]
 
 
+def test_a_real_sdk_retry_after_secs_value_wins(monkeypatch):
+    """The real SDK error names the floor `retry_after_secs`."""
+    api = FlakyApi([FakeSdkError("too many requests",
+                                 error_code="RESOURCE_EXHAUSTED",
+                                 retry_after_secs=5)], {"name": "c.s.t"})
+    ws = workspace_with(api_client=api)
+    recorder = SleepRecorder()
+    monkeypatch.setattr(client, "_sleep", recorder)
+
+    assert ws.get_table("c.s.t") == {"name": "c.s.t"}
+    assert recorder.waits == [5.0]
+
+
+def test_the_computed_wait_remains_the_floor(monkeypatch):
+    api = FlakyApi([FakeSdkError("too many requests",
+                                 error_code="RESOURCE_EXHAUSTED",
+                                 retry_after_secs=0)], {"name": "c.s.t"})
+    ws = workspace_with(api_client=api)
+    recorder = SleepRecorder()
+    monkeypatch.setattr(client, "_sleep", recorder)
+
+    assert ws.get_table("c.s.t") == {"name": "c.s.t"}
+    assert recorder.waits == [1.0]
+
+
+def test_a_real_shape_sdk_429_is_retried(monkeypatch):
+    """A real SDK 429 carries `error_code`, not `status_code`, so the word
+    list alone must still see it, and a known code must retry on its own."""
+    api = FlakyApi([
+        FakeSdkError("Too many requests", error_code="RESOURCE_EXHAUSTED"),
+        FakeSdkError("quota exceeded", error_code="REQUEST_LIMIT_EXCEEDED"),
+    ], {"name": "c.s.t"})
+    ws = workspace_with(api_client=api)
+    recorder = SleepRecorder()
+    monkeypatch.setattr(client, "_sleep", recorder)
+
+    assert ws.get_table("c.s.t") == {"name": "c.s.t"}
+    assert recorder.waits == [1.0, 2.0]
+    assert api.calls == 3
+
+
 def test_with_retry_takes_an_injected_sleep():
     calls = []
     recorder = SleepRecorder()
@@ -369,6 +441,36 @@ def test_a_transient_chunk_fetch_is_retried(monkeypatch):
     assert [row["version"] for row in rows] == ["1", "2"]
     assert recorder.waits == [1.0]
     assert statements.chunk_calls == 2
+
+
+class StateStatements:
+    """Every submission returns the same non-SUCCEEDED statement state."""
+
+    def __init__(self, state):
+        self.state = state
+        self.calls = 0
+
+    def execute_statement(self, **kwargs):
+        self.calls += 1
+        return FakeStatementResponse(columns=["version"], data=[],
+                                     state=self.state)
+
+    def get_statement_result_chunk_n(self, statement_id, chunk):
+        return SimpleNamespace(data_array=[], next_chunk_index=None)
+
+
+def test_a_canceled_statement_state_is_retried_twice_then_raises(monkeypatch):
+    """A CANCEL from the wait timeout is a passing failure. The state check
+    sits inside the retried call, so it gets three attempts in total."""
+    statements = StateStatements("CANCELED")
+    ws = workspace_with(statement_execution=statements)
+    recorder = SleepRecorder()
+    monkeypatch.setattr(client, "_sleep", recorder)
+
+    with pytest.raises(RuntimeError, match="CANCELED"):
+        ws.sql("SELECT version FROM c.s.t", target="c.s.t")
+    assert statements.calls == 3
+    assert recorder.waits == [1.0, 2.0]
 
 
 class MvRejectingStatements:

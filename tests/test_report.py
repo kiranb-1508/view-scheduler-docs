@@ -16,6 +16,14 @@ def history(name, hhmm="04:00", days=DAYS, degraded=False):
                         degraded)
 
 
+def _blocked(result):
+    """The result run.collect builds when a blocking skip withholds times."""
+    return replace(result, safe=None, earlier=None, usual=None,
+                   safe_without_outliers=None, safe_next_day=False,
+                   earlier_next_day=False,
+                   safe_without_outliers_next_day=False, usual_next_day=False)
+
+
 def test_clean_run_prints_no_warning_section():
     result = recommend([history("c.s.a"), history("c.s.b", "03:30")], 15)
     text = render("c.s.v", result, [], "Asia/Kolkata")
@@ -81,12 +89,47 @@ def test_the_no_common_day_wording_is_not_the_unreadable_wording():
     assert "could not be read" not in text
 
 
+def test_a_function_note_is_not_counted_as_a_read_failure():
+    """The headline counts blocking skips only. The warnings list must agree:
+    a function note gets its own line, with no read-failure wording."""
+    result = _blocked(recommend([history("c.s.a"), history("c.s.b", "03:30")], 15))
+    skipped = [
+        Skipped("c.s.secret", "permission denied — cannot read its history"),
+        Skipped("c.s.fn", "function dependency — nothing to refresh",
+                blocks=False),
+    ]
+    text = render("c.s.v", result, skipped, "Asia/Kolkata")
+    lines = text.splitlines()
+
+    assert "NO TIME TO SUGGEST — 1 dependency could not be read." in text
+    assert "!  2 dependencies could not be read:" not in text
+    read_line = lines.index("!  1 dependency could not be read:")
+    assert lines[read_line + 1] == (
+        "     c.s.secret — permission denied — cannot read its history")
+
+    note_line = lines.index("!  1 dependency needs no refresh:")
+    assert lines[note_line + 1] == (
+        "     c.s.fn — function dependency — nothing to refresh")
+
+
 def test_counts_read_grammatically_at_one_and_many():
     from view_scheduler.report import _plural
     assert _plural(1, "dependency") == "1 dependency"
     assert _plural(2, "dependency") == "2 dependencies"
     assert _plural(1, "day") == "1 day"
     assert _plural(30, "day") == "30 days"
+
+    one = _blocked(recommend([history("c.s.a")], 15))
+    text = render("c.s.v", one,
+                  [Skipped("ext.crm", "not readable as a Delta table")],
+                  "Asia/Kolkata")
+    assert "The times below cover only the 1 dependency that was read." in text
+
+    many = _blocked(recommend([history("c.s.a"), history("c.s.b", "03:30")], 15))
+    text = render("c.s.v", many,
+                  [Skipped("ext.crm", "not readable as a Delta table")],
+                  "Asia/Kolkata")
+    assert "The times below cover only the 2 dependencies that were read." in text
 
 
 # --- Tranche E: robustness warnings for unattended use -----------------------

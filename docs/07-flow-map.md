@@ -60,7 +60,7 @@ gate.can_refresh
 ```
 
 Both caches live in `can_refresh`: one table is read once per call, and a
-failure is remembered, not retried.
+failure is remembered rather than retried for every view.
 
 ## 4. Module roles, one line each
 
