@@ -296,8 +296,8 @@ display(spark.createDataFrame(rows))
 # MAGIC `safe` is a rolling statistic over the last 30 days, but it tends to get
 # MAGIC copied into a cron once and left there. Write this table on a schedule and
 # MAGIC compare against last week's row: when an upstream team moves their load, the
-# MAGIC recommendation moves and you find out. That is the cheapest protection
-# MAGIC available while there is no runtime gate.
+# MAGIC recommendation moves and you find out. The gate checks freshness at run
+# MAGIC time; this comparison is how you learn that the usual finish time moved.
 
 # COMMAND ----------
 

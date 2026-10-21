@@ -4,7 +4,7 @@ Runs as a Databricks notebook/python task on serverless. Takes one parameter,
 `slot`, matching an entry in plan.SLOTS.
 
 Two things it will refuse to do: touch anything outside plan.SCHEMA, and write
-at all once the 30-day window has closed — at which point it pauses every rig
+at all once the window has closed — at which point it pauses every rig
 job so nothing runs on indefinitely.
 """
 

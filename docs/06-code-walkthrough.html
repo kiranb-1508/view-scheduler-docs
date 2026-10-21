@@ -193,9 +193,9 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
 
 <div class="stats">
   <span class="stat"><b>13</b> modules</span>
-  <span class="stat"><b>15</b> classes</span>
-  <span class="stat"><b>72</b> functions &amp; methods</span>
-  <span class="stat"><b>270</b> offline tests</span>
+  <span class="stat"><b>15</b> data &amp; result classes</span>
+  <span class="stat"><b>82</b> functions &amp; methods</span>
+  <span class="stat"><b>283</b> offline tests</span>
   <span class="stat">read-only by design</span>
 </div>
 
@@ -218,9 +218,9 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
 
       <!-- arrows first, so boxes sit on top -->
       <g fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ah)">
-        <path d="M 145 84 C 145 110, 375 110, 375 138"/>
+        <path d="M 230 57 L 286 57"/>
         <path d="M 375 84 L 375 138"/>
-        <path d="M 685 84 C 685 150, 135 170, 135 248"/>
+        <path d="M 685 84 C 685 110, 250 110, 250 180 C 250 220, 135 220, 135 248"/>
         <path d="M 355 194 C 300 215, 160 220, 138 248"/>
         <path d="M 400 194 C 440 220, 480 225, 490 248"/>
         <path d="M 420 194 C 500 225, 660 225, 672 248"/>
@@ -240,7 +240,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
       <g class="mod" data-mod="init"><rect x="830" y="30" width="120" height="54"/><text x="890" y="53" text-anchor="middle">__init__.py</text><text class="sub" x="890" y="70" text-anchor="middle">public API</text></g>
 
       <!-- row 2 -->
-      <g class="mod" data-mod="run"><rect x="290" y="140" width="170" height="54"/><text x="375" y="163" text-anchor="middle">run.py</text><text class="sub" x="375" y="180" text-anchor="middle">collect() · analyze()</text></g>
+      <g class="mod" data-mod="run"><rect x="290" y="140" width="170" height="54"/><text x="375" y="163" text-anchor="middle">run.py</text><text class="sub" x="375" y="180" text-anchor="middle">collect_history() · analyze()</text></g>
 
       <!-- row 3 -->
       <g class="mod" data-mod="walker"><rect x="60" y="250" width="150" height="54"/><text x="135" y="273" text-anchor="middle">walker.py</text><text class="sub" x="135" y="290" text-anchor="middle">dependency walk</text></g>
@@ -274,14 +274,14 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
 <section id="s-trace-advise">
   <h2>3 · Trace: <code>advise("c.s.v")</code> — the advisory path</h2>
   <p>The advisory path shares the walk and the history reads with the gate. Then it rolls the data up
-  into per-day finish times and two clock times.</p>
+  into per-day finish times and up to three clock times.</p>
 
   <div class="trace" id="traceAdvise"></div>
 </section>
 
 <!-- ============================================================ -->
 <section id="s-classes">
-  <h2>4 · Class tour — all 15 classes</h2>
+  <h2>4 · Class tour — the 15 data and result classes</h2>
   <p>Blue borders are public classes. Green borders are internal data shapes.
   Frozen dataclasses carry data; they do not do I/O.</p>
 
@@ -373,7 +373,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
 
 <!-- ============================================================ -->
 <section id="s-index">
-  <h2>5 · Function index — all 72 functions and methods</h2>
+  <h2>5 · Function index — 82 entries</h2>
   <p>Type to filter. Click a module chip to narrow. Rows marked <span class="tagm priv">private</span>
   are helpers; the rest are part of the design.</p>
 
@@ -461,7 +461,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     <li><code>models.py</code> — the nouns. 45 lines. Learn Commit, Skipped, TableHistory.</li>
     <li><code>config.py</code> — the four settings. 34 lines.</li>
     <li><code>history.py</code> — the classifier. Pure, no I/O. Understand classify() and qualifying() first.</li>
-    <li><code>client.py</code> — the only I/O. Read the Workspace class and read_latest_commit().</li>
+    <li><code>client.py</code> — the only I/O. Read the Workspace class and read_commits().</li>
     <li><code>walker.py</code> — the dependency walk, the cycle guard, the depth cap.</li>
     <li><code>gate.py</code> — the product. can_refresh() then _verdict_for(). Then the report.</li>
     <li><code>recommend.py</code> — pure arithmetic for the advisory times.</li>
@@ -479,7 +479,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
 
 <footer>
   view-scheduler 0.7.0 · line numbers from the source at this version · self-contained page ·
-  generated 2026-10-16
+  checked 2026-10-21
 </footer>
 
 </main>
@@ -529,10 +529,10 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
       role:"Follows view_dependencies down to physical tables. Guards cycles, caps depth at 60, and returns one list for tables plus one for blockers and notes.",
       imports:"client.failure_category, models.Skipped",
       contents:["GATING L43", "GatingTable L53", "WalkResult L61", "walk() L69", "_view_dependencies() L78", "_Walk L112", "_reason() L195"] },
-    client: { title:"client.py — the only I/O", file:"src/view_scheduler/client.py · 389 lines",
+    client: { title:"client.py — the only I/O", file:"src/view_scheduler/client.py · 411 lines",
       role:"Every external call passes through Workspace. Metadata reads, SQL statements, chunk following, and the history readers live here. Read-only.",
       imports:"obs, history.qualifying, models, databricks.sdk",
-      contents:["active_spark() L19", "quote_name() L33", "Workspace L46 (get_table, sql)", "workspace_from_env() L168", "failure_category() L173", "is_transient() L198", "with_retry() L235", "parse_json_field() L261", "_from_epoch() L276", "read_delta_history() L290", "read_mv_refreshes() L327", "read_commits() L352", "read_latest_commit() L371"] },
+      contents:["active_spark() L19", "quote_name() L33", "Workspace L46 (get_table, sql)", "workspace_from_env() L174", "failure_category() L179", "is_transient() L214", "_retry_wait() L239", "with_retry() L257", "parse_json_field() L283", "_from_epoch() L298", "read_delta_history() L312", "read_mv_refreshes() L349", "read_commits() L374", "read_latest_commit() L393"] },
     history: { title:"history.py — the pure classifier", file:"src/view_scheduler/history.py · 196 lines",
       role:"Decides what counts as a refresh and builds per-day finish times. No I/O. Constants define the operation sets.",
       imports:"models",
@@ -541,10 +541,10 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
       role:"Turns per-table finish times into safe and earlier clock times. Pure math: medians, weekday labels, outliers, the intersection of all-clear days.",
       imports:"models",
       contents:["WEEKDAYS L12", "OUTLIER_FLOOR_MIN L17", "OUTLIER_MAD_K L18", "DependencyRow L22", "Recommendation L40", "_weekday_label() L59", "_own_span() L81", "max_gap_days() L89", "dependency_rows() L106", "_to_seconds() L160", "_outlier_dates() L164", "_median_time() L185", "observed_span() L193", "recommend() L201", "_add_buffer() L244"] },
-    report: { title:"report.py — the advice text", file:"src/view_scheduler/report.py · 218 lines",
-      role:"Renders the advisory report: header, the two times, the dependency table, the day-by-day series, and warnings. Warnings print only when they apply.",
+    report: { title:"report.py — the advice text", file:"src/view_scheduler/report.py · 228 lines",
+      role:"Renders the advisory report: header, up to three times, the dependency table, the day-by-day series, and warnings. Warnings print only when they apply.",
       imports:"models, recommend",
-      contents:["render() L38", "all_clear_series() L112", "warnings() L149", "_hhmm L14 · _day_mark L18 · _plural L22 · _too_early L30"] },
+      contents:["render() L38", "all_clear_series() L113", "warnings() L150", "_hhmm L14 · _day_mark L18 · _plural L22 · _too_early L30"] },
     config: { title:"config.py — four settings", file:"src/view_scheduler/config.py · 34 lines",
       role:"Frozen dataclass: days_history, buffer_min, timezone, fresh_hours. Validation in __post_init__. The tz property returns a ZoneInfo. DEFAULT is the shared instance.",
       imports:"dataclasses, zoneinfo",
@@ -588,18 +588,18 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
       "One raw UC metadata call per object. The walk uses it to learn table_type and view_dependencies. Through obs.call(), so the call is logged." ] },
     { fn:"_view_dependencies()", where:"walker.py:78", body:[
       "Splits a view payload into table names, function notes, and blockers. The name sits one level down: dependency[\"table\"][\"table_full_name\"]. A missing shape is a blocker, not a silent skip." ] },
-    { fn:"read_latest_commit()", where:"client.py:371", body:[
-      "The gate's one question: when did this table last really write? Reads the full history, keeps the newest qualifying commit, and ignores writes dated after the reference time (clock skew)." ] },
-    { fn:"read_commits()", where:"client.py:352", body:[
+    { fn:"_history_summary()", where:"gate.py:308", body:[
+      "Reads one table's history once, and caches the result for the whole call. Keeps the newest qualifying write not dated after now, then labels the cadence, counts the weekdays, and tests whether every weekday was seen twice." ] },
+    { fn:"read_commits()", where:"client.py:374", body:[
       "Routes by object type. DESCRIBE HISTORY for tables and streaming tables; on the materialized-view error, the pipeline event log instead. Any other error propagates and becomes a blocker." ] },
-    { fn:"read_delta_history() · read_mv_refreshes()", where:"client.py:290 · 327", body:[
+    { fn:"read_delta_history() · read_mv_refreshes()", where:"client.py:312 · 349", body:[
       "The two readers. read_delta_history selects version, epoch timestamp, operation and parameters, ordered by version. read_mv_refreshes reads completed update_progress events from event_log(TABLE(mv)).",
       "Timestamps arrive as epochs and become aware UTC datetimes — never a rendered string." ] },
     { fn:"qualifying() → classify()", where:"history.py:85 → 52", body:[
       "The classifier. Operation plus mode decide the class. Zero-row writes still qualify. Maintenance never does. An unknown operation is not counted — the conservative choice.",
-      "In read_latest_commit, only qualifying commits are kept." ] },
+      "In _history_summary, only qualifying commits are kept." ] },
     { fn:"_verdict_for()", where:"gate.py:356", body:[
-      "Turns one dependency's latest write into a Dependency: ok, last_refresh, age_minutes, detail. Unreadable → blocked. No qualifying write → blocked. Outside the window → stale with a reason." ] },
+      "Turns one dependency's history into a Dependency: ok, last_refresh, age_minutes, detail. Unreadable → blocked. No qualifying write → blocked, unless ignored. Otherwise the table earns a window from its cadence; a thin history keeps the daily window." ] },
     { fn:"GateResult.render()", where:"gate.py:159", body:[
       "Builds the report text. One block per view; every dependency gets a line with its age; stale ones print first; blockers get an unblock line naming the view. Helper functions: _dep_line, _stamp, _human_age, _plural." ] }
   ];
@@ -607,11 +607,11 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     { fn:"cli.main()", where:"cli.py:43", body:[
       "The command line: parses arguments, fails fast when the warehouse ID is missing, builds Config and Workspace, calls advise() with quiet=True, prints text or JSON." ] },
     { fn:"advise()", where:"advice.py:110", body:[
-      "The advisory front door. Builds the workspace and the settings, calls collect(), wraps everything into an Advice object, prints the report unless quiet=True." ] },
+      "The advisory front door. Builds the workspace and the settings, calls collect_history(), wraps everything into an Advice object, prints the report unless quiet=True." ] },
     { fn:"collect_history()", where:"run.py:17", body:[
       "The shared pipeline: walk() the view, read_commits() for each gating table, summarize() each history, then recommend(). Failures on one table land in skipped and the pipeline continues." ] },
     { fn:"walk()", where:"walker.py:69", body:[
-      "The advisory side of the walk. Same graph logic as the gate's walk(), but returns plain table names plus one merged skip list for the report." ] },
+      "The advisory side of the walk. Same graph logic as the gate's walk(), but the caller merges blockers and notes into one skip list for the report." ] },
     { fn:"summarize()", where:"history.py:186", body:[
       "Rolls one table's commits into a TableHistory: finish_times (first qualifying commit per local day), metrics_degraded, continuous, unknown_ops." ] },
     { fn:"finish_times() · looks_continuous()", where:"history.py:101 · 132", body:[
@@ -621,7 +621,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     { fn:"dependency_rows()", where:"recommend.py:106", body:[
       "Builds one DependencyRow per table: weekday label, median (usual), latest clock time (worst), missed days, and the outlier day when the worst day stands out by mean absolute deviation." ] },
     { fn:"report.render()", where:"report.py:38", body:[
-      "Renders the whole text: header, the two times with day markers, the dependency table, the day-by-day series (all_clear_series), and the warnings." ] },
+      "Renders the whole text: header, up to three times with day markers, the dependency table, the day-by-day series (all_clear_series), and the warnings." ] },
     { fn:"report.warnings()", where:"report.py:149", body:[
       "Prints a warning only when it applies: weekly tables, missed days, outliers, continuous tables, degraded metrics, unknown operations, midnight rollover, unreadable dependencies, thin evidence." ] },
     { fn:"_to_advice()", where:"advice.py:136", body:[
@@ -678,19 +678,26 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     ["_view_dependencies","walker",78,"_view_dependencies(meta)","priv pure","Splits a view payload into (table names, blockers, notes). Reads dependency[\"table\"][\"table_full_name\"]. A function becomes a note; an odd shape a blocker.","—"],
     ["walk","walker",69,"walk(view, fetch, max_depth=60)","pub pure","The full walk. Recurses views, ends at physical tables, guards cycles with done and on_stack sets, caps depth. Returns a WalkResult: tables, blockers, notes.","_view_dependencies, _reason"],
     ["_reason","walker",195,"_reason(exc)","priv pure","Short reason for a walk failure: permission, not found, or the exception type and message.","failure_category"],
+    ["_Walk.__init__","walker",121,"__init__(fetch, max_depth)","priv pure","One walk's state: tables, blockers, notes, the done set, and the on_stack set.","—"],
+    ["_Walk.walk","walker",130,"walk(view)","priv pure","Start at the root and freeze the three lists into a WalkResult.","_visit"],
+    ["_Walk._visit","walker",136,"_visit(name, depth)","priv pure","Skip a finished name, block a cycle or a depth overrun, or visit the object.","_visit_one"],
+    ["_Walk._visit_one","walker",157,"_visit_one(name, depth)","priv io","Fetch metadata and dispatch: a VIEW recurses, a gating type is recorded, anything else blocks.","fetch, _visit_view"],
+    ["_Walk._visit_view","walker",177,"_visit_view(name, meta, depth)","priv pure","Read view_dependencies, record notes and blockers, then visit every child.","_view_dependencies, _visit"],
     ["active_spark","client",19,"active_spark()","pub io","The live SparkSession in this process, or None. A laptop with no pyspark gets None, not an error.","SparkSession.getActiveSession"],
     ["quote_name","client",33,"quote_name(full_name)","pub pure","Backticks each dot-separated part of a UC name and doubles inner backticks. A hyphen is subtraction without it.","—"],
-    ["workspace_from_env","client",168,"workspace_from_env()","pub io","Retired: resolution now lives in Workspace(). Returns Workspace().","Workspace"],
-    ["failure_category","client",173,"failure_category(exc)","pub pure","Classifies an error as permission, not_found, mv_no_history, or other — by the message text.","—"],
-    ["is_transient","client",198,"is_transient(exc)","priv pure","True when a failed read is worth one more attempt. A status code decides first; then the error words.","—"],
-    ["with_retry","client",235,"with_retry(fn, *, kind, target, attempts=3, sleep=None)","priv io","Calls fn. Retries a passing failure, gives up on a lasting one. Three attempts, waits 1s then 2s. Reads only.","is_transient, _retry_wait, obs.retry"],
-    ["parse_json_field","client",261,"parse_json_field(value)","pub pure","Parses a JSON string or passes a dict through. None when absent or unparseable.","json.loads"],
-    ["_from_epoch","client",276,"_from_epoch(value)","priv pure","Epoch seconds to an aware UTC datetime. The same instant in every time zone.","datetime.fromtimestamp"],
-    ["read_delta_history","client",290,"read_delta_history(ws, table, *, with_metrics=True, since_epoch=None)","pub io","DESCRIBE HISTORY for one table: version, epoch timestamp, operation, parameters. Ordered newest first.","Workspace.sql, quote_name, _from_epoch, parse_json_field"],
-    ["read_mv_refreshes","client",327,"read_mv_refreshes(ws, mv, *, since_epoch=None)","pub io","Completed refreshes of an MV from its pipeline event log (update_progress, state COMPLETED).","Workspace.sql, quote_name, _from_epoch"],
-    ["read_commits","client",352,"read_commits(ws, table, *, with_metrics=True, since_epoch=None)","pub io","History for any physical object. DESCRIBE HISTORY first; the pipeline event log when the object is a materialized view.","read_delta_history, read_mv_refreshes"],
-    ["read_latest_commit","client",371,"read_latest_commit(ws, table, *, not_after=None, since_epoch=None)","pub io","The gate's one question: the newest qualifying write, or None. Ignores writes after not_after (clock skew).","read_commits, qualifying"],
+    ["workspace_from_env","client",174,"workspace_from_env()","pub io","Retired: resolution now lives in Workspace(). Returns Workspace().","Workspace"],
+    ["failure_category","client",179,"failure_category(exc)","pub pure","Classifies an error as permission, not_found, mv_no_history, or other — by the message text.","—"],
+    ["is_transient","client",214,"is_transient(exc)","priv pure","True when a failed read is worth one more attempt. A status code decides first; then the error words.","—"],
+    ["_retry_wait","client",239,"_retry_wait(exc, computed)","priv pure","The larger of the error's retry-after value and the computed wait. The computed wait is the floor.","—"],
+    ["with_retry","client",257,"with_retry(fn, *, kind, target, attempts=3, sleep=None)","priv io","Calls fn. Retries a passing failure, gives up on a lasting one. Three attempts, waits 1s then 2s. Reads only.","is_transient, _retry_wait, obs.retry"],
+    ["parse_json_field","client",283,"parse_json_field(value)","pub pure","Parses a JSON string or passes a dict through. None when absent or unparseable.","json.loads"],
+    ["_from_epoch","client",298,"_from_epoch(value)","priv pure","Epoch seconds to an aware UTC datetime. The same instant in every time zone.","datetime.fromtimestamp"],
+    ["read_delta_history","client",312,"read_delta_history(ws, table, *, with_metrics=True, since_epoch=None)","pub io","DESCRIBE HISTORY for one table: version, epoch timestamp, operation, parameters. Ordered newest first.","Workspace.sql, quote_name, _from_epoch, parse_json_field"],
+    ["read_mv_refreshes","client",349,"read_mv_refreshes(ws, mv, *, since_epoch=None)","pub io","Completed refreshes of an MV from its pipeline event log (update_progress, state COMPLETED).","Workspace.sql, quote_name, _from_epoch"],
+    ["read_commits","client",374,"read_commits(ws, table, *, with_metrics=True, since_epoch=None)","pub io","History for any physical object. DESCRIBE HISTORY first; the pipeline event log when the object is a materialized view.","read_delta_history, read_mv_refreshes"],
+    ["read_latest_commit","client",393,"read_latest_commit(ws, table, *, not_after=None, since_epoch=None)","pub io","The newest qualifying write, or None. Ignores writes after not_after. Used by tests only; the gate uses _history_summary.","read_commits, qualifying"],
     ["Workspace.__init__","client",67,"__init__(warehouse_id=None, client=None, spark=None)","pub io","Holds the SDK client, the warehouse ID, and the Spark session. Resolves the engine; tests inject a fake here.","active_spark"],
+    ["Workspace.w","client",86,"w (property)","pub io","The SDK client, built once on first use. A plain Workspace with a live Spark session never touches it.","WorkspaceClient"],
     ["Workspace.get_table","client",94,"get_table(full_name)","pub io","Raw UC metadata for one object, including view_dependencies. Percent-encoded path. Retried on a passing failure.","obs.call, with_retry"],
     ["Workspace.sql","client",108,"sql(statement, target)","pub io","Runs one read-only statement. Follows result chunks to the end, refuses a truncated result, returns rows as dicts.","obs.call, with_retry"],
     ["classify","history",52,"classify(commit)","pub pure","Operation plus mode decide the class: full_replace, incremental, ignore, or unknown. WRITE is read with its mode.","—"],
@@ -701,6 +708,8 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     ["finish_times","history",101,"finish_times(commits, today, days, tz)","pub pure","First qualifying commit of each local day → {date: timestamp}. The advisory tool's core assumption.","qualifying"],
     ["qualifying_per_day","history",117,"qualifying_per_day(commits, today, days, tz)","pub pure","How many qualifying commits landed on each day in the window.","qualifying"],
     ["looks_continuous","history",132,"looks_continuous(commits, today, days, tz)","pub pure","True when the median commits per day is 6 or more — the finish time is only a floor.","qualifying_per_day"],
+    ["looks_multi_daily","history",141,"looks_multi_daily(commits, today, days, tz)","pub pure","True when the median qualifying commits per active day is 2 or more.","qualifying_per_day"],
+    ["daily_slot_times","history",150,"daily_slot_times(commits, today, days, tz)","pub pure","Median clock time of each daily run for a multi-daily table. Empty when the table is not multi-daily or looks continuous.","looks_multi_daily, looks_continuous"],
     ["summarize","history",186,"summarize(name, commits, today, days, tz)","pub pure","One table's TableHistory: finish_times, metrics_degraded, continuous, unknown_ops.","finish_times, is_degraded, looks_continuous, unknown_operations"],
     ["_weekday_label","recommend",59,"_weekday_label(days, span, own=None)","priv pure","Words for the observed pattern: daily, Mondays, Mon,Thu, or never. The table's own span decides daily.","—"],
     ["_own_span","recommend",81,"_own_span(days)","priv pure","The contiguous range from the table's first write day to its last.","—"],
@@ -712,9 +721,9 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     ["observed_span","recommend",193,"observed_span(histories)","pub pure","The contiguous date range from the earliest to the latest refresh seen anywhere.","—"],
     ["recommend","recommend",201,"recommend(histories, buffer_min)","pub pure","The roll-up: intersect finish days, take the latest all-clear time as safe and the median as earlier, add the buffer. Returns a Recommendation.","observed_span, dependency_rows, _add_buffer"],
     ["_add_buffer","recommend",244,"_add_buffer(moment, minutes)","priv pure","Adds the buffer and reports whether it crossed midnight.","—"],
-    ["render","report",38,"render(view, result, skipped, timezone)","pub pure","The whole advice text: header, two times, dependency table, day series, warnings.","_hhmm, _plural, _day_mark, _too_early, all_clear_series, warnings"],
-    ["all_clear_series","report",112,"all_clear_series(result)","pub pure","The evidence block: which day set the SCHEDULE AT time. The earlier time is a median, so no single day sets it.","—"],
-    ["warnings","report",149,"warnings(result, skipped)","pub pure","Every warning that applies, in plain words: weekly, missed, outlier, continuous, degraded, unknown ops, midnight, unreadable, thin evidence.","_plural, _hhmm"],
+    ["render","report",38,"render(view, result, skipped, timezone)","pub pure","The whole advice text: header, up to three times, dependency table, day series, warnings.","_hhmm, _plural, _day_mark, _too_early, all_clear_series, warnings"],
+    ["all_clear_series","report",113,"all_clear_series(result)","pub pure","The evidence block: which day set the SCHEDULE AT time. The earlier time is a median, so no single day sets it.","—"],
+    ["warnings","report",150,"warnings(result, skipped)","pub pure","Every warning that applies, in plain words: weekly, missed, outlier, continuous, degraded, unknown ops, midnight, unreadable, thin evidence.","_plural, _hhmm"],
     ["_hhmm","report",14,"_hhmm(value)","priv pure","Time as HH:MM, or an em dash for None.","—"],
     ["_day_mark","report",18,"_day_mark(next_day)","priv pure","The (+1 day) marker when the buffer crossed midnight.","—"],
     ["_plural","report",22,"_plural(n, word)","priv pure","Grammar for counts, with y-to-ies handling.","—"],
@@ -725,7 +734,8 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     ["Config.__post_init__","config",23,"__post_init__()","pub pure","Rejects fresh_hours and days_history at zero or below. Fails loudly, not silently.","—"],
     ["Config.tz","config",30,"tz (property)","pub pure","Builds a ZoneInfo from the timezone string.","ZoneInfo"],
     ["setup","obs",14,"setup(level=INFO)","pub io","Attaches a stderr handler to the package logger, once.","logging.StreamHandler"],
-    ["call","obs",25,"call(kind, target, **extra)","pub io","Context manager. Times one external call and logs one JSON line, whether it succeeds or raises.","logger.info"]
+    ["call","obs",25,"call(kind, target, **extra)","pub io","Context manager. Times one external call and logs one JSON line, whether it succeeds or raises.","logger.info"],
+    ["retry","obs",42,"retry(kind, target, attempt, pause, reason)","pub io","Logs one retry with its attempt number, wait, and reason.","logger.info"]
   ];
   var idxBody = document.getElementById("idxBody");
   var q = document.getElementById("q");

@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Lazy Scheduler</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +19,8 @@ h2{font-size:1.5rem}
 .screen pre{background:transparent;border:0;padding:0;margin:0;font-size:12.4px;line-height:1.7}
 td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
 </style>
+</head>
+<body>
 
 <div class="wrap">
 
@@ -37,7 +44,7 @@ td.cut{color:var(--crit);font-family:"JetBrains Mono",monospace;font-size:12px}
   <p>This is the deliverable. If a junior engineer can read this at 3am and act, we're done.</p>
   <div class="screen">
 <pre><code>VIEW   sales_gold.customer_360
-       8 dependencies · last 30 days · times IST
+       8 dependencies · last 30 days · times Asia/Kolkata
 
        SCHEDULE AT  07:00    safe — every job had finished, on all 30 days
        EARLIER      05:20    one job had not finished yet, on 1 of 30 days
@@ -94,7 +101,7 @@ def refreshed_today(t):
     return row.timestamp.date() == date.today() and wrote_rows(row)</code></pre>
   <div class="note good">
     <span class="tag">Why this is the real fix</span>
-    <p>With the gate, a wrong recommendation costs five minutes of waiting. Skip the gate, and a wrong recommendation silently publishes yesterday's numbers to a report. That difference is why a gate would be worth more than every statistical refinement in v3 combined, and it is why the analyzer keeps its outlier and continuous-refresh warnings in the meantime: those exist precisely because nothing catches a bad number at runtime.</p>
+    <p>With the gate, a wrong recommendation costs five minutes of waiting. Skip the gate, and a wrong recommendation silently publishes yesterday's numbers to a report. The analyzer still keeps its outlier and continuous-refresh warnings: the gate proves a dependency wrote, not that its timing was typical.</p>
   </div>
   <p>It also deletes the nastiest bug we found: late runs bleeding into the next day and dragging the recommendation <em>earlier</em>. The gate doesn't care what day a commit was attributed to. It asks whether the table refreshed, now.</p>
 </section>
@@ -105,11 +112,11 @@ def refreshed_today(t):
   <h2>What you build</h2>
   <ol>
     <li><strong>Walk the dependencies.</strong> Recurse <code>view_dependencies</code> from the UC Tables API. Views pass through, tables are what matter. Unchanged from v3 — this part was never the problem.</li>
-    <li><strong>Pull each table's history.</strong> <code>DESCRIBE HISTORY</code>, keep commits that wrote rows. Read the operation class from <code>operationParameters.mode</code>, not the operation name — plain <code>WRITE</code> is the most common one and its mode is what tells you whether it's a real refresh.</li>
+    <li><strong>Pull each table's history.</strong> <code>DESCRIBE HISTORY</code>, keep qualifying writes. Read the operation class from the operation name and, for a plain <code>WRITE</code>, from <code>operationParameters.mode</code> — that mode tells you whether it replaced or appended. A zero-row write still counts.</li>
     <li><strong>Per table, per day: when did it finish?</strong> First qualifying commit of each day. Collect: usual (median), worst (max), days missed, and which weekdays it runs.</li>
-    <li><strong>Recommend.</strong> Worst all-clear across dependencies, plus a buffer. Print the table above.</li>
+    <li><strong>Recommend.</strong> The latest normal all-clear across dependencies, plus a buffer. Keep the outlier days in a second line. Print the table above.</li>
   </ol>
-  <p>Four steps. Four config values: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST), and <code>fresh_hours</code> (24 — the gate's window).</p>
+  <p>Four steps. Four config values: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (Asia/Kolkata), and <code>fresh_hours</code> (24 — the gate's window).</p>
 </section>
 
 <hr>
@@ -120,15 +127,15 @@ def refreshed_today(t):
     <table>
       <thead><tr><th>Deleted</th><th>Replaced by</th><th>Add back when</th></tr></thead>
       <tbody>
-        <tr><td class="cut">8-class cadence classifier</td><td>A "refreshes" column showing observed days</td><td>Never — a human reads this faster than a classifier decides it</td></tr>
+        <tr><td class="cut">8-class cadence classifier</td><td>A "refreshes" column showing observed days</td><td>Only in the gate, to widen a window — the advisor still shows observed days</td></tr>
         <tr><td class="cut">Ordinal slot model</td><td>First commit of the day</td><td>Already back (0.6.0)</td></tr>
         <tr><td class="cut">Cycle attribution + cutover detection</td><td>Calendar day</td><td>A pipeline genuinely straddles midnight — then set the day boundary by hand</td></tr>
-        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "typical"</td><td>Already back (0.6.0)</td></tr>
+        <tr><td class="cut">Coverage tiers, order statistics</td><td>"Worst" and "typical"</td><td>Never — the report names the worst day instead</td></tr>
         <tr><td class="cut">Changepoint detection</td><td>The 30 days are on screen</td><td>You automate the check and no human reads the output</td></tr>
-        <tr><td class="cut">Tolerance bands, outlier rules</td><td><em>Nothing — this row was wrong.</em> The gate no longer replaces the outlier check: the gate guards the run, the analyzer still names the day pinning <code>safe</code></td><td>Already back</td></tr>
+        <tr><td class="cut">Tolerance bands, outlier rules</td><td><em>Nothing — this row was wrong.</em> The gate does not replace the outlier check: the gate guards the run, the analyzer still names the day pinning <code>safe</code></td><td>Already back</td></tr>
         <tr><td class="cut">Timing/reliability split</td><td>A "missed" column</td><td>Never</td></tr>
         <tr><td class="cut">18-item blind spot register</td><td>Only what applies, usually 0–3 lines</td><td>Never — the other 15 were noise on any given run</td></tr>
-        <tr><td class="cut">10 of 13 parameters</td><td>3</td><td>Someone asks for one</td></tr>
+        <tr><td class="cut">10 of 13 parameters</td><td>4</td><td>Someone asks for one</td></tr>
       </tbody>
     </table>
   </div>
@@ -151,3 +158,5 @@ def refreshed_today(t):
 </section>
 
 </div>
+</body>
+</html>
