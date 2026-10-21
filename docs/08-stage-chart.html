@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stage chart - View Materialization Scheduler</title>
+<style>
+:root {
+  --paper: #e8eced;
+  --sheet: #fafbf9;
+  --ink: #16232b;
+  --soft: #3f515b;
+  --mute: #6d7f87;
+  --hair: #bcc8cb;
+  --teal: #0c6673;
+  --teal-wash: #dcebed;
+  --rust: #8e3f2c;
+  --rust-wash: #f0e1dc;
+  --ochre: #8a6414;
+  --ochre-wash: #f3ead3;
+  --sans: "Franklin Gothic Medium", "Bahnschrift SemiCondensed", "Arial Narrow", Arial, sans-serif;
+  --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --mono: Consolas, "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0b1215;
+    --sheet: #111b1f;
+    --ink: #dde6e7;
+    --soft: #b0bfc3;
+    --mute: #82969c;
+    --hair: #2c3a40;
+    --teal: #66bcc7;
+    --teal-wash: #0f2a2f;
+    --rust: #dc947e;
+    --rust-wash: #2f1b17;
+    --ochre: #d9b05c;
+    --ochre-wash: #2b2313;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.55;
+}
+.sheet {
+  max-width: 1180px;
+  margin: 28px auto;
+  background: var(--sheet);
+  border: 1px solid var(--hair);
+  padding: 38px 46px 0;
+}
+code {
+  font-family: var(--mono);
+  font-size: .85em;
+  background: color-mix(in srgb, var(--hair) 32%, transparent);
+  padding: 1px 4px;
+}
+h1, h2, h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: .005em;
+  line-height: 1.1;
+  margin: 0;
+}
+p { margin: 0 0 9px; }
+ul { margin: 7px 0 0; padding-left: 18px; }
+li { margin: 4px 0; }
+
+.masthead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 34px;
+  align-items: end;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 24px;
+}
+.kicker {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--teal);
+  margin: 0 0 10px;
+}
+h1 {
+  font-size: clamp(2.3rem, 5.2vw, 4.1rem);
+  max-width: 21ch;
+  margin-bottom: 12px;
+}
+.dek {
+  max-width: 64ch;
+  font-size: 1.03rem;
+  color: var(--soft);
+  margin: 0;
+}
+.stamp {
+  border: 1px solid var(--ink);
+  padding: 12px 16px 10px;
+  text-align: center;
+  min-width: 116px;
+}
+.stamp b {
+  display: block;
+  font-family: var(--sans);
+  font-size: 24px;
+  line-height: 1;
+}
+.stamp span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mute);
+  margin-top: 6px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hair);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--soft);
+}
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.swatch { width: 18px; height: 3px; display: inline-block; }
+.sw-ink { background: var(--ink); }
+.sw-teal { background: var(--teal); }
+.sw-rust { background: var(--rust); }
+.sw-ochre { background: var(--ochre); }
+
+.stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 186px;
+  gap: 30px;
+  margin-left: 14px;
+  padding: 26px 0 30px 34px;
+  border-left: 2px solid var(--ink);
+}
+.stage .num {
+  position: absolute;
+  left: -16px;
+  top: 22px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: var(--sheet);
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.stage h2 {
+  font-size: 22px;
+  margin-bottom: 5px;
+}
+.fn {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+  margin-left: 10px;
+  white-space: nowrap;
+}
+.stage p, .lane-stage p { max-width: 74ch; color: var(--soft); }
+.refs {
+  align-self: start;
+  border-left: 1px dotted var(--hair);
+  padding-left: 14px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--mute);
+}
+.entries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+.entry {
+  border: 1px solid var(--hair);
+  padding: 12px 14px;
+  font-size: 15px;
+  color: var(--soft);
+}
+.entry b {
+  display: block;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.entry.advisor { border-top: 3px solid var(--teal); }
+.entry.gate { border-top: 3px solid var(--rust); }
+.entry .ref {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mute);
+}
+
+.split-svg {
+  display: block;
+  width: 100%;
+  height: 38px;
+  margin-left: 14px;
+}
+.split-svg path {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.fork-note {
+  margin-left: 14px;
+  padding: 4px 0 18px 34px;
+  border-left: 2px solid var(--ink);
+  max-width: 78ch;
+  color: var(--soft);
+}
+.fork-note b { color: var(--ink); }
+
+.lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  border-top: 1px solid var(--hair);
+  padding-top: 0;
+}
+.lane { min-width: 0; }
+.lane-head {
+  padding: 20px 0 18px 34px;
+  border-left: 2px solid var(--lane);
+  margin-left: 14px;
+  background: linear-gradient(var(--wash), transparent);
+}
+.lane-head h2 {
+  font-size: 28px;
+  color: var(--lane);
+}
+.lane-head .q {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mute);
+  margin: 0 0 4px;
+}
+.lane-head code {
+  display: inline-block;
+  margin-top: 7px;
+  font-size: 11.5px;
+  background: none;
+  padding: 0;
+  color: var(--soft);
+}
+.lane.advisor { --lane: var(--teal); --wash: var(--teal-wash); }
+.lane.gate { --lane: var(--rust); --wash: var(--rust-wash); }
+.lane-stage {
+  border-left-color: var(--lane);
+  padding-left: 34px;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.lane-stage .num { border-color: var(--lane); }
+.lane-stage h2 { font-size: 19px; }
+.lane-stage .refs {
+  border-left: 0;
+  border-top: 1px dotted var(--hair);
+  padding: 8px 0 0;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.outputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  border-top: 2px solid var(--ink);
+  margin-top: 8px;
+  padding: 22px 0 26px;
+}
+.output h2 {
+  font-size: 17px;
+  margin-bottom: 4px;
+}
+.output .type {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--mute);
+  margin-bottom: 8px;
+}
+.output ul { font-size: 14.5px; color: var(--soft); }
+.output.advisor h2 { color: var(--teal); }
+.output.gate h2 { color: var(--rust); }
+
+.corrections {
+  border-left: 3px solid var(--ochre);
+  background: var(--ochre-wash);
+  padding: 14px 18px;
+  margin: 8px 0 30px;
+}
+.corrections h2 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.corrections ul {
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--soft);
+}
+
+.titleblock {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.5fr 1fr;
+  border: 1px solid var(--ink);
+  margin: 0 -46px;
+}
+.titleblock div {
+  padding: 10px 14px;
+  border-right: 1px solid var(--ink);
+}
+.titleblock div:last-child { border-right: 0; }
+.titleblock span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .04em;
+  color: var(--mute);
+  margin-bottom: 3px;
+}
+.titleblock b {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+@media (max-width: 900px) {
+  .sheet { padding: 26px 22px 0; margin: 0; border: 0; }
+  .masthead { grid-template-columns: 1fr; gap: 18px; }
+  .stamp { justify-self: start; }
+  .stage { grid-template-columns: 1fr; gap: 12px; padding-left: 28px; }
+  .refs { border-left: 0; border-top: 1px dotted var(--hair); padding: 8px 0 0; text-align: left; }
+  .entries { grid-template-columns: 1fr; }
+  .split-svg { display: none; }
+  .lanes, .outputs { grid-template-columns: 1fr; gap: 0; }
+  .lane-stage { padding-left: 28px; }
+  .titleblock { grid-template-columns: 1fr 1fr; margin: 0 -22px; }
+  .titleblock div:nth-child(2) { border-right: 0; }
+  .titleblock div:nth-child(-n+2) { border-bottom: 1px solid var(--ink); }
+}
+@media print {
+  body { background: #fff; }
+  .sheet { margin: 0; max-width: none; border: 0; }
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<header class="masthead">
+  <div>
+    <p class="kicker">Stage chart · view-scheduler 0.7.0</p>
+    <h1>One spine, two answers</h1>
+    <p class="dek">Three shared stages turn a view name into per-day commit evidence. Then the path
+    forks: the advisor reads that evidence as a timetable, and the gate reads it as a freshness test.</p>
+  </div>
+  <div class="stamp">
+    <b>0.7.0</b>
+    <span>read-only</span>
+  </div>
+</header>
+
+<div class="legend">
+  <span><i class="swatch sw-ink"></i>shared spine</span>
+  <span><i class="swatch sw-teal"></i>advisor</span>
+  <span><i class="swatch sw-rust"></i>gate</span>
+  <span><i class="swatch sw-ochre"></i>fails closed</span>
+</div>
+
+<main>
+  <article class="stage">
+    <div class="num">1</div>
+    <div>
+      <h2>Enter<span class="fn">two doors, one question each</span></h2>
+      <p>A person or a job names a view. The advisor and the gate start from the same name,
+      but they do not share an orchestrator.</p>
+      <div class="entries">
+        <div class="entry advisor">
+          <b>Advisor</b>
+          <code>view-scheduler c.s.v</code> or <code>advise(view)</code>. Both reach
+          <code>collect_history()</code>.
+          <span class="ref">cli.py:43 · advice.py:110 · run.py:17</span>
+        </div>
+        <div class="entry gate">
+          <b>Gate</b>
+          <code>can_refresh(view)</code> or <code>can_refresh([v1, v2])</code>. One call can
+          check many views.
+          <span class="ref">gate.py:190</span>
+        </div>
+      </div>
+    </div>
+    <div class="refs">
+      advice.py:110<br>
+      cli.py:43<br>
+      gate.py:190
+    </div>
+  </article>
+
+  <article class="stage">
+    <div class="num">2</div>
+    <div>
+      <h2>Walk<span class="fn">walker.walk()</span></h2>
+      <p>The walk reads Unity Catalog metadata and follows <code>view_dependencies</code> down to
+      the physical objects that must be fresh. It returns three lists: <code>tables</code>,
+      <code>blockers</code>, and <code>notes</code>.</p>
+      <ul>
+        <li><code>VIEW</code> lists children. Follow each <code>table_full_name</code>.</li>
+        <li><code>MANAGED</code>, <code>EXTERNAL</code>, <code>MATERIALIZED_VIEW</code>, and
+        <code>STREAMING_TABLE</code> stop the branch and gate the view.</li>
+        <li>A SQL UDF is a note. It has no refresh to wait for, so it never blocks.</li>
+        <li>A cycle, an unreadable object, a view with no dependencies, or a path deeper than 60
+        is a blocker.</li>
+        <li><code>done</code> prevents duplicate work. <code>on_stack</code> detects a cycle.</li>
+      </ul>
+    </div>
+    <div class="refs">
+      walker.py:69<br>
+      _view_dependencies<br>
+      GATING: walker.py:43<br>
+      MAX_DEPTH: walker.py:45
+    </div>
+  </article>
+
+  <article class="stage">
+    <div class="num">3</div>
+    <div>
+      <h2>Read<span class="fn">client.read_commits()</span></h2>
+      <p>All history reads go through one <code>Workspace</code>. Its engine is chosen once, when
+      the object is built.</p>
+      <ul>
+        <li>Engine order: an explicit warehouse ID, then <code>$WAREHOUSE_ID</code>, then a live
+        Spark session. Metadata always goes through the SDK.</li>
+        <li>A table or streaming table answers <code>DESCRIBE HISTORY</code>. A materialized view
+        rejects it, so the pipeline event log is read instead.</li>
+        <li>History reads are bounded to the configured day window. Transient failures get 3 attempts;
+        a permanent failure raises at once.</li>
+        <li>The advisor reads metrics. The gate does not. Both go through <code>read_commits()</code>.</li>
+      </ul>
+    </div>
+    <div class="refs">
+      client.py:46<br>
+      client.py:374<br>
+      read_delta_history:312<br>
+      read_mv_refreshes:349<br>
+      with_retry:257
+    </div>
+  </article>
+
+  <article class="stage">
+    <div class="num">4</div>
+    <div>
+      <h2>Classify<span class="fn">history.classify() · qualifying()</span></h2>
+      <p>A commit is a refresh only when its operation says so. The name and the write mode are
+      read together.</p>
+      <ul>
+        <li><b>Full replace:</b> CREATE OR REPLACE, INSERT OVERWRITE, <code>WRITE</code> with mode
+        <code>Overwrite</code>, MV REFRESH.</li>
+        <li><b>Incremental:</b> MERGE, UPDATE, COPY INTO, STREAMING UPDATE, INSERT,
+        <code>WRITE</code> with mode <code>Append</code> or no mode.</li>
+        <li><b>Never a refresh:</b> OPTIMIZE, VACUUM, DELETE, and the other maintenance names.
+        Unknown names also do not count, but they are named in the report.</li>
+        <li>A zero-row write still counts. The job ran.</li>
+        <li><code>finish_times()</code> keeps the first qualifying commit of each local day.
+        <code>qualifying_per_day()</code> feeds the multi-daily (median 2+) and continuous
+        (median 6+) flags.</li>
+      </ul>
+    </div>
+    <div class="refs">
+      history.py:52<br>
+      qualifying:85<br>
+      finish_times:101<br>
+      qualifying_per_day:117<br>
+      summarize:186
+    </div>
+  </article>
+
+  <div class="fork-note">
+    <p><b>The evidence is the same. The question is not.</b> The advisor asks when this view can
+    run, from history. The gate asks whether every dependency is fresh now. The advisor never
+    checks today; the gate never suggests a time.</p>
+  </div>
+
+  <svg class="split-svg" viewBox="0 0 1000 38" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M 0 0 V 18" stroke="var(--ink)" />
+    <path d="M 0 18 H 750" stroke="var(--ink)" />
+    <path d="M 250 18 V 38" stroke="var(--teal)" />
+    <path d="M 750 18 V 38" stroke="var(--rust)" />
+  </svg>
+
+  <div class="lanes">
+    <section class="lane advisor">
+      <header class="lane-head">
+        <p class="q">When can this view run?</p>
+        <h2>Advisor</h2>
+        <code>advise() · advisory, from history</code>
+      </header>
+
+      <article class="lane-stage stage">
+        <div class="num">5</div>
+        <div>
+          <h2>Decide the safe time<span class="fn">recommend.recommend()</span></h2>
+          <p><code>collect_history()</code> summarizes each table. <code>recommend()</code> then
+          intersects the days when every dependency wrote.</p>
+          <ul>
+            <li><b>safe</b> is the latest all-clear clock time, plus the buffer.</li>
+            <li><b>safe_without_outliers</b> drops late rerun days. An outlier is more than 30
+            minutes above the median and more than 3 mean deviations.</li>
+            <li><b>earlier</b> is the median normal all-clear time, plus the buffer. The report
+            labels it EARLIER.</li>
+            <li>A blocking unreadable dependency withholds every time, but keeps the rows and the
+            day-by-day evidence.</li>
+            <li>A buffer that crosses midnight sets the <code>(+1 day)</code> mark.</li>
+          </ul>
+        </div>
+        <div class="refs">
+          run.py:41<br>
+          recommend.py:201<br>
+          _add_buffer:244<br>
+          _outlier_dates:164
+        </div>
+      </article>
+
+      <article class="lane-stage stage">
+        <div class="num">6</div>
+        <div>
+          <h2>Report the timetable<span class="fn">report.render()</span></h2>
+          <p>The report is text. <code>Advice</code> carries the same numbers as fields, so a job
+          can log them.</p>
+          <ul>
+            <li>Prints SCHEDULE AT, WITH OUTLIERS, EARLIER, one row per dependency, the day
+            series, and any warning that applies.</li>
+            <li><code>advise(quiet=True)</code> suppresses the print. The CLI <code>--json</code>
+            option prints <code>Advice.to_dict()</code>.</li>
+            <li>This path never gates a run. Pair it with <code>can_refresh()</code>.</li>
+          </ul>
+        </div>
+        <div class="refs">
+          advice.py:136<br>
+          report.py:38<br>
+          warnings:150
+        </div>
+      </article>
+    </section>
+
+    <section class="lane gate">
+      <header class="lane-head">
+        <p class="q">Can this view run now?</p>
+        <h2>Gate</h2>
+        <code>can_refresh() · runtime verdict</code>
+      </header>
+
+      <article class="lane-stage stage">
+        <div class="num">5</div>
+        <div>
+          <h2>Decide fresh or stale<span class="fn">gate._history_summary() · _verdict_for()</span></h2>
+          <p>One table is read once per call. A failure is cached too, so a broken dependency is
+          not retried for every view.</p>
+          <ul>
+            <li>The latest qualifying write not dated after <code>now</code> decides. A future
+            write is ignored, so clock skew cannot make a stale table look fresh.</li>
+            <li>A daily table gets <code>fresh_hours</code>, default 24. A trusted weekly-ish
+            table gets <code>(longest weekday gap + 1) × fresh_hours</code>.</li>
+            <li>Trust needs every written weekday seen at least twice, and not all seven weekdays.
+            Thin history keeps the 24-hour window.</li>
+            <li><code>view_scheduler.mode=weekly</code> forces the 8× window. Ignored modes and
+            <code>ignore_tables</code> pass.</li>
+            <li>No qualifying write blocks, unless the table is ignored or
+            <code>ignore_non_daily</code> is set.</li>
+            <li>An unreadable dependency blocks, even when it is marked as ignored. The gate fails
+            closed.</li>
+          </ul>
+        </div>
+        <div class="refs">
+          gate.py:274<br>
+          _history_summary:308<br>
+          _verdict_for:356<br>
+          IGNORED_MODES:60
+        </div>
+      </article>
+
+      <article class="lane-stage stage">
+        <div class="num">6</div>
+        <div>
+          <h2>Report the verdict<span class="fn">GateResult.render()</span></h2>
+          <p>The calling job acts on <code>ready</code>. The package never refreshes anything.</p>
+          <ul>
+            <li>Prints READY or BLOCKED per view, then a line per dependency with its last refresh
+            and age.</li>
+            <li>Names every blocker and the view that needs it.</li>
+            <li><code>to_dict()</code> is JSON-ready for a job log. <code>blockers()</code>
+            returns the flattened list.</li>
+          </ul>
+        </div>
+        <div class="refs">
+          gate.py:159<br>
+          GateResult.to_dict:129<br>
+          can_refresh:190
+        </div>
+      </article>
+    </section>
+  </div>
+
+  <div class="outputs">
+    <section class="output advisor">
+      <h2>Advisor output</h2>
+      <p class="type">Advice</p>
+      <ul>
+        <li><code>safe_time</code>, <code>safe_without_outliers</code>, <code>usual_time</code>,
+        <code>earlier_time</code>, <code>outlier_days</code></li>
+        <li><code>dependencies</code>, <code>unreadable</code>, <code>finished_by_day</code>,
+        <code>warnings</code></li>
+        <li><code>to_dict()</code> for a job log</li>
+      </ul>
+    </section>
+    <section class="output gate">
+      <h2>Gate output</h2>
+      <p class="type">GateResult</p>
+      <ul>
+        <li><code>ready</code>, <code>views</code>, <code>fresh_hours</code>,
+        <code>timezone</code></li>
+        <li><code>blockers()</code>, then <code>to_dict()</code> for a job log</li>
+        <li>One <code>Dependency</code> per gating table, cycle, unreadable object, or function
+        note</li>
+      </ul>
+    </section>
+  </div>
+
+  <aside class="corrections">
+    <h2>Corrections to the older flow docs</h2>
+    <ul>
+      <li>A streaming table is not a separate continuous case. It is a gating leaf and is read
+      like any other table.</li>
+      <li><code>read_latest_commit()</code> is not the gate's question. The gate uses
+      <code>_history_summary()</code>; <code>read_latest_commit()</code> is used by tests only.</li>
+    </ul>
+  </aside>
+</main>
+
+<footer class="titleblock">
+  <div><span>Subject</span><b>View materialization scheduler</b></div>
+  <div><span>Version</span><b>0.7.0</b></div>
+  <div><span>Checked against</span><b>src/view_scheduler · 2026-10-21</b></div>
+  <div><span>Sheet</span><b>08 · stage chart</b></div>
+</footer>
+
+</div>
+</body>
+</html>

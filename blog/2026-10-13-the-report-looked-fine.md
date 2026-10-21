@@ -50,16 +50,17 @@ Four steps, no magic: walk the dependency tree down to real tables, read each on
 
 ## What it looks like
 
-One command per question. Here is the gate telling me, before a refresh job runs, that one upstream table is two days old:
+One call per question. Here is the gate telling me, before a refresh job runs, that one upstream table is two days old:
 
 ```
-$ view-scheduler sales.gold.v_revenue
+>>> from view_scheduler import can_refresh
+>>> print(can_refresh("sales.gold.v_revenue"))
 
 GATE  BLOCKED   1 view, window 24h, times Asia/Kolkata
 
   BLOCKED sales.gold.v_revenue
-      fresh  sales.silver.orders        last refresh 2026-10-13 04:00 (2h 5m ago)
-      stale  sales.silver.daily_sales  last refresh 2026-10-11 04:00 (2d 2h ago) — older than the 24h window
+      fresh  sales.silver.orders        (MANAGED)  last refresh 2026-10-13 04:00 (2h 5m ago)
+      stale  sales.silver.daily_sales   (MANAGED)  last refresh 2026-10-11 04:00 (2d 2h ago) — older than the 24h window
 
 To unblock, refresh:
   sales.silver.daily_sales   (needed by sales.gold.v_revenue)
@@ -78,15 +79,15 @@ VIEW   sales.gold.customer_360
        SCHEDULE AT  06:15   safe — every job had finished, on all 30 days
        EARLIER      05:15   one job had not finished yet, on 2 of 30 days
 
-DEPENDENCY             RUNS   USUAL   LATEST   DAYS
-silver.daily_orders    daily  03:00   03:00    30
-silver.orders          daily  04:30   06:00    30
-silver.daily_sales     daily  04:45   04:45    29
+DEPENDENCY             RUNS   USUAL   LATEST   DAYS   MISSED
+silver.daily_orders    daily  03:00   03:00    30     0
+silver.orders          daily  04:30   06:00    30     0
+silver.daily_sales     daily  04:45   04:45    29     1
 
 !  silver.daily_sales did not run on 1 of 30 days — no schedule time fixes that
 ```
 
-The safe time is the worst finish over 30 days, plus a 15-minute buffer. The earlier time tells you how it looks without that padding — and how many days it would have been wrong. The evidence is printed, not hidden behind a score.
+`SCHEDULE AT` is the latest finish of a normal day, plus a 15-minute buffer. A late rerun gets its own `WITH OUTLIERS` line, so one bad day cannot drag the daily schedule. The `EARLIER` time says how the typical day looks without that padding — and how many days it would have been wrong. The evidence is printed, not hidden behind a score.
 
 ## Try it
 

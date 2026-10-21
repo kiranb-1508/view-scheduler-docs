@@ -1,7 +1,7 @@
 # HANDOFF — rebuild the View Scheduler from these requirements
 
 Status: requirements and decisions are final unless the owner says otherwise.
-Date: 2026-10-08.
+Date: 2026-10-08. Updated: 2026-10-21.
 Audience: a new engineer or agent rebuilding this project from scratch.
 
 Read this whole document before you write code. It contains the exact
@@ -41,7 +41,7 @@ One small Python library. Two tools.
 
 | Tool | Question | Type |
 |---|---|---|
-| `analyze(view)` | When each day can this view run, from history? | Advisory. Predicts. |
+| `advise(view)` | When each day can this view run, from history? | Advisory. Predicts. |
 | `can_refresh(view or [views])` | Right now, is every dependency fresh? | The gate. Enforces. |
 
 The gate is the product. The advisory tool may ship beside it.
@@ -218,8 +218,10 @@ checks.
 
 ### Wording rule for this tool
 
-Plain words only. The two times are called **safe** and **earlier**. Do not use
-"tighter", "all-clear", or "advisory" anywhere a user can see. The table
+Plain words only. The report labels are **SCHEDULE AT**, **WITH OUTLIERS**
+(only when an outlier day exists), and **EARLIER**. The object fields are
+`safe_time`, `safe_without_outliers`, and `earlier_time`. Do not use "tighter",
+"all-clear", or "advisory" anywhere a user can see. The table
 columns are `RUNS / USUAL / LATEST / DAYS / MISSED`. The evidence block is
 `WHEN THE LAST JOB FINISHED, DAY BY DAY`. Say "job" or "table" where you can.
 
@@ -501,7 +503,7 @@ The owner was interviewed in depth. These are settled:
 - Add one drift test: the SQL/set that decides "qualifying" must agree with the
   Python classifier for the whole operation zoo.
 
-- The reference implementation has **176 tests**, all offline.
+- The current implementation has **283 tests**, all offline.
 
 ---
 
@@ -514,7 +516,7 @@ The owner was interviewed in depth. These are settled:
 - Ship the wheel through the Unity Catalog Volume, so UC grants govern access.
 - **Bump the version when behaviour changes.** The pre-gate wheel and the
   gate wheel were both `0.1.0` once, which made pinning impossible. The gate
-  is `0.2.0`.
+  first shipped in `0.2.0`; the package is now `0.7.0`.
 - Build, then install into a clean virtual environment and import the public
   names, before you upload.
 
@@ -568,16 +570,14 @@ if you are careless.
 
 ---
 
-## 16. Open questions to resolve with the owner
+## 16. Questions already resolved
 
-Ask before assuming:
+The owner answered these after the first release:
 
-1. Is the advisory tool (`analyze`) still wanted, or is the gate the product?
-2. Should the rig window extend past 2026-10-31?
-3. Does the gate ever join the CLI, later?
-4. Should the SQL read be bounded (a `LIMIT` or a pushed-down predicate), or is
-   a full history read acceptable? The reference kept a single Python
-   classifier as the source of truth to avoid drift.
+1. **Both tools ship.** `advise` is the public advisory call; `can_refresh` is the gate. `analyze` stays as the low-level advisory call for raw history.
+2. **The rig window is fixed.** It runs from 2026-09-01 to 2026-10-31, then pauses. Do not extend it.
+3. **The CLI stays advisory.** There is no gate subcommand. A job calls `can_refresh()` from the library.
+4. **History reads are bounded.** Each read carries a `since_epoch` cutoff computed from `days_history`, so the warehouse returns a small window instead of the whole history.
 
 ---
 
@@ -601,8 +601,8 @@ Ask before assuming:
 
 ## 18. Reference implementation
 
-The current code is in the repository on branch `feat/gate-hardening`
-(PR #5). Read it, but treat section 3 and section 7 as the source of truth.
+The current code is in this repository, under `src/view_scheduler/`.
+Read it as the final state; sections 3 and 7 state the required behaviour.
 
 Key files:
 

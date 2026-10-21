@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scheduler Internals</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,6 +30,8 @@ table{min-width:580px}
 td code{background:transparent;padding:0;font-size:.83em}
 .n{font-variant-numeric:tabular-nums}
 </style>
+</head>
+<body>
 
 <div class="wrap">
 
@@ -37,8 +44,8 @@ td code{background:transparent;padding:0;font-size:.83em}
 <section>
   <h2><span class="num">00</span>What it does</h2>
   <p>Input a Unity Catalog view name. Output a recommended daily start time plus the evidence behind it.</p>
-  <p>It talks to exactly two things: the <strong>UC Tables API</strong>, to find what the view depends on, and a <strong>SQL warehouse</strong> via the SDK's Statement Execution API, to read each dependency's commit history. Everything else is arithmetic in memory. No state store, no database, nothing persisted between runs. There is no Spark session — the tool runs anywhere the SDK does.</p>
-  <p>History comes from <code>DESCRIBE HISTORY</code> for ordinary tables. A <strong>materialized view rejects that statement</strong> (<code>EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE</code>), so refresh times fall back to the pipeline event log — <code>event_log(TABLE(mv))</code>, filtered to <code>update_progress</code> / <code>COMPLETED</code>. Two consequences: the event log is per-pipeline, so a completion means the pipeline finished rather than that one table specifically (a conservative proxy, never earlier than the table was ready); and by default only the pipeline's run-as user can read it, so a caller without that access gets a skipped entry rather than a crash.</p>
+  <p>It talks to the <strong>UC Tables API</strong> for dependency metadata, and to a <strong>history engine</strong> for commit history: an explicit SQL warehouse, the <code>WAREHOUSE_ID</code> environment variable, or a live <strong>Spark session</strong> when one exists. Everything else is arithmetic in memory. No state store, no database, nothing persisted between runs. No Spark session is required — a laptop with a warehouse ID works.</p>
+  <p>History comes from <code>DESCRIBE HISTORY</code> for ordinary tables. A <strong>materialized view rejects that statement</strong> (<code>EXPECT_TABLE_NOT_VIEW.NO_ALTERNATIVE</code>), so refresh times fall back to the pipeline event log — <code>event_log(TABLE(mv))</code>, filtered to <code>update_progress</code> / <code>COMPLETED</code>. Two consequences: the event log is per-pipeline, so a completion means the pipeline finished rather than that one table specifically (a conservative proxy, never earlier than the table was ready); and by default only the pipeline's run-as user can read it, so a caller without that access gets a skipped entry in the advisor, or a blocker in the gate, rather than a crash.</p>
 </section>
 
 <hr>
@@ -63,7 +70,7 @@ td code{background:transparent;padding:0;font-size:.83em}
 
           <rect x="236" y="18" width="188" height="52" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4"/>
           <text x="330" y="41" text-anchor="middle" font-size="12.5">Delta log</text>
-          <text x="330" y="58" text-anchor="middle" font-size="10.5" opacity="0.65">via Spark · DESCRIBE HISTORY</text>
+          <text x="330" y="58" text-anchor="middle" font-size="10.5" opacity="0.65">warehouse or Spark</text>
 
           <text x="470" y="48" font-size="11" opacity="0.6">no external calls beyond this point</text>
 
@@ -120,7 +127,7 @@ td code{background:transparent;padding:0;font-size:.83em}
     <figcaption>Only steps 1 and 2 leave the process. The walker is the only component that loops — it re-enters itself for every dependency that turns out to be another view. Steps 3 and 4 are pure functions over what step 2 returned.</figcaption>
   </figure>
 
-  <p>The practical consequence of that shape: <strong>cost is dominated by step 1</strong>, because <code>view_dependencies</code> is one REST call per object and isn't returned by <code>listTables</code>. Step 2 is one Spark call per <em>physical table</em>, which is a smaller number. Memoize the walker on full name and shared subtrees get visited once.</p>
+  <p>The practical consequence of that shape: <strong>cost is dominated by step 1</strong>, because <code>view_dependencies</code> is one REST call per object and isn't returned by <code>listTables</code>. Step 2 is one history read per <em>physical table</em>, which is a smaller number. Memoize the walker on full name and shared subtrees get visited once.</p>
 </section>
 
 <hr>
@@ -217,39 +224,32 @@ td code{background:transparent;padding:0;font-size:.83em}
 
 <section>
   <h2><span class="num">03</span>Step 1 — Walk the dependencies</h2>
-  <pre><code>def walk(fqn, seen=None):
-    seen = seen if seen is not None else set()
-    if fqn in seen: return [], []          # cycle guard
-    seen.add(fqn)
+  <pre><code>def walk(fqn, done, on_stack):
+    if fqn in done: return []                 # finished by another path
+    if fqn in on_stack: return [CYCLE]        # same path twice: block
 
-    meta = uc_api(f"tables/{fqn}")          # one call per object
+    on_stack.add(fqn)
+    meta = uc_api(f"tables/{fqn}")            # one call per object
     kind = meta["table_type"]
 
     if kind == "VIEW":
-        tables, skipped = [], []
-        for d in meta.get("view_dependencies", {}).get("dependencies", []):
-            # The name is nested under a "table" key — reading d["table_full_name"]
-            # directly finds nothing and sends every dependency down the
-            # function branch, returning zero gating tables.
-            full_name = (d.get("table") or {}).get("table_full_name")
-            if not full_name:               # function or unrecognized shape
-                skipped.append((d, "function")); continue
-            t, s = walk(full_name, seen)
-            tables += t; skipped += s
-        return tables, skipped
+        result = [walk(child) for child in children_of(meta)]
+    elif kind in GATING:                      # MANAGED, EXTERNAL, MV, STREAMING
+        result = [fqn]                        # a real history stops the branch
+    else:
+        result = [BLOCKER(fqn, kind)]         # FOREIGN, HMS, unreadable
 
-    if kind in ("MANAGED", "EXTERNAL", "MATERIALIZED_VIEW", "STREAMING_TABLE"):
-        return [fqn], []
-
-    return [], [(fqn, kind)]                # FOREIGN, HMS, unreadable</code></pre>
-  <p>A permission error on one node returns it as skipped rather than raising — a partial answer that names its gaps beats no answer. The walk is serial today; concurrency and 429 backoff are described in §08 as not yet built.</p>
+    on_stack.remove(fqn)
+    done.add(fqn)
+    return result</code></pre>
+  <p>A function dependency is a <em>note</em>, not a blocker: a SQL UDF has no refresh to wait for. Anything unreadable is a <em>blocker</em>, because the gate fails closed. A permission error on one node returns a blocker rather than raising — a partial answer that names its gaps beats no answer. The walk is serial today; concurrency is described in §08 as not yet built.</p>
 </section>
 
 <hr>
 
 <section>
   <h2><span class="num">04</span>Step 2 — Read the history</h2>
-  <p>The one place where detail genuinely matters. <strong>Operation class comes from <code>operationParameters</code>, not the operation name.</strong> The most common name is plain <code>WRITE</code>, and only its <code>mode</code> says whether it replaced the table or appended to it.</p>
+  <p>The one place where detail genuinely matters. <strong>Read the operation name, and for a plain <code>WRITE</code>, read <code>operationParameters.mode</code> too.</strong> The most common name is plain <code>WRITE</code>, and only its <code>mode</code> says whether it replaced the table or appended to it.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Class</th><th>Matches</th><th>Qualifies when</th></tr></thead>
@@ -286,7 +286,7 @@ def qualifying(commit):
 <section>
   <h2><span class="num">05</span>Steps 3 and 4 — Roll up and recommend</h2>
   <pre><code>def finish_times(table, days=30):
-    hist = read_history(table)                    # SQL warehouse, not Spark
+    hist = read_commits(table)                    # warehouse or Spark
     good = [r for r in hist if qualifying(r) and within(r, days)]
     by_day = {}
     for r in sorted(good, key=lambda r: r.timestamp):
@@ -302,19 +302,25 @@ def recommend(tables, buffer_min=15):
     # sorting the datetimes returns whatever happened last, a wrong answer
     # that looks entirely plausible.
     ordered = sorted(all_clear.values(), key=lambda m: m.time())
-    safe = ordered[-1] + buffer_min
-    # earlier is the typical day: the median of the normal days, plus the
-    # buffer. The median ignores the reruns that push a rare day out.
-    earlier = median(all_clear.values()) + buffer_min
-    return safe, earlier, len(days)</code></pre>
+    normal = [m for m in ordered if not is_outlier(m, all_clear)]
+    safe_all = ordered[-1] + buffer_min           # WITH OUTLIERS
+    safe = normal[-1] + buffer_min                # SCHEDULE AT
+    # earlier is the typical normal day: the median of the normal days, plus
+    # the buffer. The median ignores the reruns that push a rare day out.
+    earlier = median(normal) + buffer_min
+    return safe, safe_all, earlier, len(days)</code></pre>
+  <div class="note warn">
+    <span class="tag">Outliers get their own line</span>
+    <p>An outlier day is a rerun that finished far later than normal. The report puts the latest normal day on <code>SCHEDULE AT</code> and the latest day of all on <code>WITH OUTLIERS</code>. That keeps a one-off rerun from moving the daily schedule, while still showing the time that would have worked every day. <code>SCHEDULE AT</code> and <code>WITH OUTLIERS</code> are the same line when no outlier exists.</p>
+  </div>
   <div class="note warn">
     <span class="tag">Watch the midnight rollover</span>
     <p>Adding the buffer can push the time past midnight: a 23:50 all-clear plus 15 minutes is <strong>00:05 the next day</strong>. Returning the bare clock time loses that, and <code>00:05</code> read as a same-day schedule runs roughly 24 hours early — before any dependency has refreshed. The code carries a <code>safe_next_day</code> flag and the report prints <code>(+1 day)</code> plus a warning.</p>
   </div>
   <p><strong>Read the intersection carefully.</strong> A day only counts if every dependency refreshed on it. Days where something didn't run are excluded from the timing numbers and reported instead in the <em>missed</em> column — because a table that misses days is a reliability problem, and no schedule time fixes it.</p>
   <div class="note">
-    <span class="tag">Where the two numbers come from</span>
-    <p><code>all_clear[-1]</code> is the worst day, and <code>median(all_clear)</code> is the typical day. The worst day is the same order statistic the earlier spec dressed up as a 95% coverage tier — with ~21 usable days the maximum is roughly a 95% figure anyway, so the honest presentation is just "worst day in 30". The typical day needs no confidence language: half the days finish sooner.</p>
+    <span class="tag">Where the numbers come from</span>
+    <p><code>normal[-1]</code> is the latest normal day, <code>all_clear[-1]</code> is the latest day of all, and <code>median(normal)</code> is the typical day. The latest day of all is the same order statistic the earlier spec dressed up as a 95% coverage tier — with ~21 usable days the maximum is roughly a 95% figure anyway, so the honest presentation is just "worst day in 30". The typical day needs no confidence language: half the days finish sooner.</p>
   </div>
 
   <h3>Worked example</h3>
@@ -332,19 +338,19 @@ def recommend(tables, buffer_min=15):
   <p>Wednesday was bad because <code>customers</code> ran late; Thursday because <code>orders</code> did. You wait for the slowest table each day, not the average — the same way you leave when the last friend arrives, not the average friend.</p>
   <p>Sort those five all-clear times: <code>04:00, 04:00, 04:10, 05:30, 06:10</code>. Then:</p>
   <ul>
-    <li><strong>safe</strong> = worst + 15 min = <strong>06:25</strong> — would have worked on all five days.</li>
-    <li><strong>earlier</strong> = typical day + 15 min = <strong>04:25</strong> — the middle of the five is 04:10. It would have failed on Wednesday and Thursday, the two days that finished above it.</li>
+    <li><strong>SCHEDULE AT</strong> = latest normal day + 15 min = <strong>06:25</strong> — no day in this sample is an outlier, so it covers all five.</li>
+    <li><strong>EARLIER</strong> = typical day + 15 min = <strong>04:25</strong> — the middle of the five is 04:10. It would have failed on Wednesday and Thursday, the two days that finished above it.</li>
   </ul>
-  <p>Over 30 days rather than 5, the earlier time is the midpoint of the run, so about half the days finish after it. That makes it the tighter of the two times, never a worst case. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
+  <p>Over 30 days rather than 5, the earlier time is the midpoint of the run, so about half the days finish after it. That makes it the tighter of the schedule lines, never a worst case. The buffer is only a small margin so the job isn't starting the same second the last table finished.</p>
 </section>
 
 <hr>
 
 <section>
   <h2><span class="num">06</span>Config and output</h2>
-  <p>Four parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (IST), and <code>fresh_hours</code> (24 — the gate's rolling window).</p>
+  <p>Four parameters: <code>days_history</code> (30), <code>buffer_min</code> (15), <code>timezone</code> (Asia/Kolkata, or IST), and <code>fresh_hours</code> (24 — the gate's rolling window).</p>
   <p><strong>Timestamps are read as epochs, not as rendered strings.</strong> A Databricks <code>TIMESTAMP</code> renders in the warehouse's session timezone, and the Statement Execution API appends a <code>Z</code> suffix whose accuracy therefore depends on warehouse configuration this tool does not control. Selecting <code>unix_timestamp(timestamp)</code> sidesteps the question entirely — an epoch is the same instant however the session renders it. The single <code>timezone</code> parameter then decides which local day each instant falls on, which is the only place a timezone should matter.</p>
-  <p>The report carries: the two times, the per-dependency table (<code>RUNS / USUAL / LATEST / DAYS / MISSED</code>), the day-by-day finish list behind those two times, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
+  <p>The report carries: the two times, or three when outliers exist; the per-dependency table (<code>RUNS / USUAL / LATEST / DAYS / MISSED</code>), the day-by-day finish list behind those times, and warnings <strong>only where they apply</strong> — a weekly dependency, a table that missed days, an unrecognized operation, a start time past midnight, a branch that couldn't be read. When none apply, that section prints nothing.</p>
 </section>
 
 <hr>
@@ -367,7 +373,7 @@ def recommend(tables, buffer_min=15):
     <table>
       <thead><tr><th>Not built</th><th>Consequence today</th></tr></thead>
       <tbody>
-        <tr><td><strong>Concurrency and 429 backoff</strong> in the walker</td><td>The walk is serial — one REST call per object, and step 1 is the cost bottleneck. A wide dependency graph is slow, and a throttle becomes a skipped entry rather than a retry.</td></tr>
+        <tr><td><strong>Concurrency in the walker</strong></td><td>The walk is serial — one REST call per object, and step 1 is the cost bottleneck. A wide dependency graph is slow. A transient 429 is retried; a lasting failure becomes a blocker.</td></tr>
         <tr><td><strong>Per-table retention windows</strong></td><td><code>days_history</code> is a flat cutoff for every table. A dependency with a short <code>delta.logRetentionDuration</code> reports a large <code>MISSED</code> count that looks like a reliability problem but is only a shorter history.</td></tr>
         <tr><td><strong>A day-boundary parameter</strong></td><td>Days are calendar days in the configured timezone. A pipeline that genuinely straddles midnight cannot be re-anchored; the report flags a past-midnight start but does not model the cycle.</td></tr>
       </tbody>
@@ -376,3 +382,5 @@ def recommend(tables, buffer_min=15):
 </section>
 
 </div>
+</body>
+</html>

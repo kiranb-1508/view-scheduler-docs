@@ -23,7 +23,7 @@ starts anyway and publishes stale data, silently. Pair it with the gate —
 `can_refresh` — which checks every dependency's actual last write before the
 refresh runs. Set the schedule from history; guard the run with the gate.
 
-**The arithmetic is still being validated.** A 30-day fixture rig
+**The arithmetic is still being validated.** A 61-day fixture rig
 (`rig/`) is running now to check the day-spread logic against real multi-day
 commit history. Until that completes, treat output as indicative. Hence `0.7.0`.
 
@@ -337,10 +337,12 @@ is tried again, twice. A read that fails for a lasting reason blocks at once.
 | [docs/01-plan.html](docs/01-plan.html) | The plan. Start here — output shape, what's built, what was deliberately cut |
 | [docs/02-scheduler-design.html](docs/02-scheduler-design.html) | Scheduler design: architecture, code flow, four steps, worked example |
 | [docs/03-impact-design.html](docs/03-impact-design.html) | Impact analysis: given a table, what depends on it. Separate tool, separate data source |
-| [docs/04-library-flow.html](docs/04-library-flow.html) | Visual end-to-end flow: input, functions, branches, recommendation, and report |
+| [docs/04-library-flow.html](docs/04-library-flow.html) | Original design record: the first end-to-end flow, with the shipped rules corrected in place |
 | [docs/05-interactive-guide.html](docs/05-interactive-guide.html) | Interactive guide: clickable flow, a gate simulator, the design decisions, and the open findings |
-| [docs/06-code-walkthrough.html](docs/06-code-walkthrough.html) | Code walkthrough: the module map, call traces, a class tour, and a searchable index of all 72 functions |
-| [rig/README.md](rig/README.md) | The 30-day fixture rig and its checkpoints |
+| [docs/06-code-walkthrough.html](docs/06-code-walkthrough.html) | Code walkthrough: the module map, call traces, a class tour, and a searchable function index |
+| [docs/07-flow-map.md](docs/07-flow-map.md) | Flow map: public surface, shared spine, both call chains, and where to change each behavior |
+| [docs/08-stage-chart.html](docs/08-stage-chart.html) | Stage chart: the current six-stage flow, where it forks, and the source line for each step |
+| [rig/README.md](rig/README.md) | The 61-day fixture rig and its checkpoints |
 | [GENIE-PROMPT.md](GENIE-PROMPT.md) | Build prompt for Databricks Genie Code, phased with verification gates |
 
 Section 08 of the scheduler design lists what the docs describe but nobody
@@ -363,6 +365,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-270 tests, all offline — no Spark session, no network, no credentials.
+283 tests, all offline — no Spark session, no network, no credentials.
 `tools/` holds diagnostic scripts that run against a live workspace;
-`rig/` builds and checks the 30-day fixture. Neither ships in the wheel.
+`rig/` builds and checks the 61-day fixture. Neither ships in the wheel.

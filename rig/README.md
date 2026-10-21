@@ -1,16 +1,16 @@
-# 30-day fixture rig
+# 61-day fixture rig
 
 Produces real, multi-day Delta commit history so the scheduler's day-spread
 arithmetic can be validated against something other than fixtures.
 
 Delta stamps a commit when it happens and there is no supported override, so
-this cannot be compressed: 30 days of history takes 30 days. What it *can* do is
+this cannot be compressed: 61 days of history takes 61 days. What it *can* do is
 be predictable — every write is a function of `(table, date)` through md5, so the
 expected output is known in advance and can be checked automatically.
 
 ## Window
 
-`2026-09-01` → `2026-09-30`. Past the end date the task pauses all seven jobs
+`2026-09-01` → `2026-10-31`. Past the end date the task pauses all seven jobs
 instead of writing.
 
 ## Layout
@@ -76,7 +76,8 @@ python rig/check.py v_realistic      # one view
 | 1 | Every slot fired; each table has its day-1 commits |
 | 3 | Day attribution correct on both midnight tables — where a timezone bug shows |
 | 8 | `t_weekly_mon` labelled `Mons`; `t_flaky` and `t_daily_late_tail` have each had one bad day |
-| 30 | Full run of every view against the oracle |
+| 30 | First full run of every view against the oracle (the 30-day default) |
+| 61 | Final full run; the window closes |
 
 The late days and the flaky skips are deliberately spread across the window.
 Ranked purely by hash all five landed in the final week, which would have left
@@ -86,12 +87,12 @@ the early checkpoints blind.
 
 Everything is confined to `workspace.sched_rig`. Both `setup_rig.py` and
 `write_slot.py` refuse any statement that does not reference it. The scheduler
-package itself (`src/scheduler/`) is strictly read-only and is not involved in
-writing any of this.
+package itself (`src/view_scheduler/`) is strictly read-only and is not involved
+in writing any of this.
 
-`delta.logRetentionDuration` is set to 60 days on the rig's own tables. At the
-30-day default, day-1 commits age out of `DESCRIBE HISTORY` exactly as the
-experiment completes. No table outside the rig is altered.
+`delta.logRetentionDuration` is set to 60 days on the rig's own tables. The
+analyzer's default window is 30 days, so the rig keeps more history than the
+analysis reads. No table outside the rig is altered.
 
 ## Stopping it
 

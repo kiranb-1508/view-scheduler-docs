@@ -1,5 +1,10 @@
 # Genie Code build prompt
 
+> Historical prompt. It records the first build brief. The current contract is
+> in `README.md` and `HANDOFF.md`: the project now ships the runtime gate
+> `can_refresh()`, cadence-aware gate windows, a Spark history path, and
+> epoch-based timestamps. Where this text conflicts with the code, the code wins.
+
 Part A goes in Genie Code **User instructions** (⚙️ → User instructions) once.
 Part B prompts go in the chat, one at a time, waiting at each gate.
 
@@ -39,31 +44,30 @@ DOMAIN FACTS — established, do not rediscover or "improve"
    mix of Azure Data Factory, Databricks jobs, and Synapse Link; ADF and Synapse
    never appear in Databricks job system tables. Delta commit history is the only
    uniform signal.
-4. Operation class comes from operationParameters.mode, NOT the operation name.
-   The commonest name is plain "WRITE"; mode=Overwrite is full replace,
-   mode=Append is incremental. Classifying by name marks most tables dormant —
-   a silent wrong answer, not an error.
-5. A full-replace commit qualifies regardless of row count. A recompute that
-   produced zero rows still ran.
+4. Operation class comes from the operation name plus, for a plain "WRITE",
+   operationParameters.mode. The commonest name is plain "WRITE";
+   mode=Overwrite is full replace, mode=Append is incremental. Classifying by
+   mode alone misses CREATE OR REPLACE, MERGE, and MV REFRESH.
+5. Any qualifying write counts, including a zero-row write. A recompute that
+   produced zero rows still ran, and so did a zero-row append.
 6. If operationMetrics is null/empty, treat the commit as qualifying and flag the
    table "metrics-degraded". ADF and Synapse write through non-Spark paths and
    may emit sparse metrics. Without this, live tables read as dormant.
 7. DESCRIBE HISTORY does NOT contain partition values written by a commit.
    Build no partition-based logic.
-8. Databricks TIMESTAMP renders in spark.sql.session.timeZone (default UTC). Pin
-   it explicitly or the same view returns different times on different warehouses.
-9. History retention is delta.logRetentionDuration (default 30d). VACUUM does NOT
-   truncate DESCRIBE HISTORY. Derive each table's real window from its oldest
-   entry; never assume 30 days.
+8. Databricks TIMESTAMP renders in spark.sql.session.timeZone (default UTC).
+   Read history timestamps as epochs (`unix_timestamp`) so the instant does not
+   depend on the warehouse session setting.
+9. History retention is delta.logRetentionDuration. VACUUM does NOT truncate
+   DESCRIBE HISTORY. Reads are bounded by `days_history` (30) with a
+   `since_epoch` cutoff; the tool does not derive a per-table retention window.
 10. A day counts only if EVERY dependency refreshed on it. Days where something
     didn't run are excluded from timing and reported in a separate "missed"
     column — a table that misses days is a reliability problem no schedule fixes.
 
-DO NOT BUILD
-No pre-flight gate, cadence classifier, confidence tiers, coverage percentages,
-slot model, changepoint detection, caching layer, or state store. A prior design
-had all of them and they were deleted as unusable. If you think one is needed,
-stop and ask.
+DO NOT BUILD confidence tiers, coverage percentages, a caching layer, or a
+state store. A prior design had all of them and they were deleted as unusable.
+The runtime gate and cadence windows are in scope; see HANDOFF.md.
 
 ENGINEERING STANDARDS
 - Code lives in workspace files as .py modules, not inline in notebooks. One thin
@@ -132,9 +136,10 @@ tests alone.
 ### Phase 3
 ```
 Phase 3 — roll-up and recommendation. recommend(tables, buffer_min) ->
-(safe, earlier, n_days). Intersect days so only cycles where EVERY dependency
-refreshed are counted. all_clear per day = max across tables. safe = worst +
-buffer, earlier = the typical day + buffer (the median of the normal days).
+(safe, safe_all, earlier, n_days). Intersect days so only cycles where EVERY
+dependency refreshed are counted. all_clear per day = max across tables.
+safe = latest normal day + buffer, safe_all = latest day of all + buffer,
+earlier = the typical normal day + buffer (the median of the normal days).
 
 GATE: unit tests with hand-built timestamps, including exactly this case:
   orders:     Mon 04:00  Tue 04:10  Wed 04:05  Thu 05:30  Fri 04:00
@@ -146,7 +151,7 @@ Then run end to end on @<your real view>. Then stop.
 
 ### Phase 4
 ```
-Phase 4 — report. Render: the two times, then one row per dependency (name,
+Phase 4 — report. Render: up to three times (SCHEDULE AT, WITH OUTLIERS when it applies, EARLIER), then one row per dependency (name,
 runs, usual, latest, days, missed), then warnings. Warnings print ONLY when
 they apply — no applicable warnings means that section is absent entirely,
 not empty. Plain words only: no "tighter", no "all-clear".

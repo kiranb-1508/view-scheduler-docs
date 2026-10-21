@@ -149,6 +149,7 @@ tr.hidden{display:none}
 .chip.crash{background:var(--surface-sunk);color:var(--ink-soft);border:1px solid var(--rule)}
 .chip.test{background:var(--good-soft);color:var(--good)}
 .chip.decide{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn)}
+.chip.fixed{background:var(--good-soft);color:var(--good);border:1px solid var(--good)}
 /* case study columns */
 .case{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
 @media (max-width:860px){.case{grid-template-columns:1fr}}
@@ -181,7 +182,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
   <p class="lead">One job refreshes a view on a schedule. An upstream table may not have refreshed yet.
   The refresh still runs and publishes stale data. Nothing errors. Nobody is told.
   This guide shows how the tool makes that failure loud, step by step. It marks every important design decision.
-  It ends with the open findings that wait for your approval.</p>
+  It ends with the findings from the audit, each marked fixed or open.</p>
 </header>
 
 <nav class="toc" aria-label="Sections">
@@ -193,7 +194,7 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
   <button data-go="s-decisions">Design decisions</button>
   <button data-go="s-case">Case study</button>
   <button data-go="s-wars">War stories</button>
-  <button data-go="s-open">Open findings</button>
+  <button data-go="s-open">Findings</button>
   <button data-go="s-glossary">Glossary</button>
   <span class="spacer"></span>
   <button id="theme" type="button">Theme</button>
@@ -264,13 +265,13 @@ footer{border-top:2px solid var(--ink);margin-top:70px;padding-top:18px;
     </div>
     <div class="step-panel" data-step="3">
       <h3>Each table tells its last write</h3>
-      <p>For a table or streaming table: <code>DESCRIBE HISTORY</code> through the SQL Statement API.
-      Timestamps are read as <strong>epochs</strong>, not rendered strings — a rendered timestamp depends on the
+      <p>For a table or streaming table: <code>DESCRIBE HISTORY</code> through the SQL Statement API,
+      or through a live Spark session when one exists. Timestamps are read as <strong>epochs</strong>, not rendered strings — a rendered timestamp depends on the
       warehouse session time zone, which the tool does not control.</p>
       <p>A materialized view rejects <code>DESCRIBE HISTORY</code>. Its completed refreshes come from the pipeline
       event log instead. A streaming table is a Delta table and answers <code>DESCRIBE HISTORY</code> — its refreshes
       appear as <code>STREAMING UPDATE</code> commits.</p>
-      <span class="where">client.py → read_delta_history() · read_mv_refreshes() · read_latest_commit()</span>
+      <span class="where">client.py → read_delta_history() · read_mv_refreshes() · gate._history_summary()</span>
     </div>
     <div class="step-panel" data-step="4">
       <h3>Each commit gets a class</h3>
@@ -397,7 +398,7 @@ To unblock, refresh:
       <div class="bar"><span id="verdict" class="ready">READY</span><span style="color:var(--ink-mute);font-size:13px">simulated · no network</span></div>
       <div class="note warn" id="simBanner"><span class="tag">Open finding A1</span>
         <p>All dependencies are functions. The code answers READY after measuring <strong>nothing</strong>.
-        If a function reads a stale table, this answer is wrong. See the open findings.</p></div>
+        If a function reads a stale table, this answer is wrong. See the findings.</p></div>
       <pre id="simReport"></pre>
     </div>
   </div>
@@ -577,15 +578,16 @@ To unblock, refresh:
     <p>No network, no warehouse, no Spark, no credentials. A fake <code>Workspace</code> injects history.
     Every test passes <code>now=</code>, so the rolling window is deterministic. The report text is pinned
     byte-for-byte by a golden test.</p>
-    <p><strong>Open gap (E1):</strong> the tests never exercise the real SQL seam — pagination, chunks, the
-    timeout. See the findings.</p>
+    <p><strong>The SQL seam is partly covered.</strong> Offline tests with a fake SDK transport exercise chunk
+    following and retry states. The truncation guard and the 50s timeout still need direct tests.</p>
   </div></details>
 
   <details><summary><span class="dnum">D19</span>Plain words in every user-visible string.</summary>
   <div class="body">
-    <p>The two times are called <strong>safe</strong> and <strong>earlier</strong>. The columns are
-    <code>RUNS / USUAL / LATEST / DAYS / MISSED</code>. Never "tighter", "all-clear", or jargon like "window"
-    without the number.</p>
+    <p>The report labels are <strong>SCHEDULE AT</strong>, <strong>WITH OUTLIERS</strong> when an outlier day exists,
+    and <strong>EARLIER</strong>. The object fields are <code>safe_time</code>, <code>safe_without_outliers</code>,
+    and <code>earlier_time</code>. The columns are <code>RUNS / USUAL / LATEST / DAYS / MISSED</code>.
+    Never "tighter", "all-clear", or jargon like "window" without the number.</p>
   </div></details>
 </section>
 
@@ -641,7 +643,7 @@ To unblock, refresh:
   <div class="note good">
     <span class="tag">Why this matters beyond one table</span>
     <p>The bug was not a crash. It was a design rule — "always fresh" — that sounded safe and was wrong for a
-    subclass: the scheduled streaming table. Every open finding below is checked for this same shape.</p>
+    subclass: the scheduled streaming table. Every finding below is checked for this same shape.</p>
   </div>
 </section>
 
@@ -688,9 +690,9 @@ To unblock, refresh:
 
 <!-- ================================================================ -->
 <section id="s-open">
-  <h2>9 · Open findings — proposed changes, waiting for approval</h2>
+  <h2>9 · Findings — fixed and open</h2>
   <p>A deep audit (five independent passes over the gate, the walk, the I/O seam, the advisory tool, and the
-  Databricks docs) found these. None is fixed yet. Filter by type.</p>
+  Databricks docs) found these. Each row keeps the original finding and states its status today.</p>
   <div class="filters" id="filters">
     <button class="on" data-f="all">All</button>
     <button data-f="ready">False READY</button>
@@ -724,21 +726,21 @@ To unblock, refresh:
           <td><span class="chip readnor">false READY</span></td>
           <td>Reject a naive <code>now</code>, or document the requirement. Low blast radius; the default clock is correct.</td></tr>
         <tr data-t="advice"><td><strong>B1</strong></td>
-          <td>The advisory tool treats the first commit of a day as "finished loading". A table with a small early commit and a later real load (or 2–5 batches a day) gets a safe time at the wrong moment. The rig cannot catch it — the oracle shares the assumption.</td>
-          <td><span class="chip advice">wrong time</span></td>
-          <td>Detect multi-write tables and say so, or use the last qualifying commit of the day for the safe time.</td></tr>
+          <td>At the time of the audit, the advisory tool treated the first commit of a day as "finished loading". A table with a small early commit and a later real load (or 2–5 batches a day) got a safe time at the wrong moment. The rig could not catch it — the oracle shares the assumption.</td>
+          <td><span class="chip advice">wrong time</span> <span class="chip fixed">addressed in 0.7.0</span></td>
+          <td>The report now flags a multi-daily or continuous table, names each usual and safe run time, and says the schedule uses its first run.</td></tr>
         <tr data-t="advice"><td><strong>B2</strong></td>
-          <td>An unreadable dependency is dropped from the intersection, but the headline still says "every job had finished". A late, unreadable job cannot push the safe time later.</td>
-          <td><span class="chip advice">wrong time</span></td>
-          <td>Refuse to print a safe time when any dependency is unreadable.</td></tr>
+          <td>At the time of the audit, an unreadable dependency was dropped from the intersection, but the headline still said "every job had finished". A late, unreadable job could not push the safe time later.</td>
+          <td><span class="chip advice">wrong time</span> <span class="chip fixed">fixed in 0.7.0</span></td>
+          <td>Done. <code>collect_history</code> withholds every time when any dependency blocks, and keeps the readable evidence.</td></tr>
         <tr data-t="advice"><td><strong>B3</strong></td>
           <td>Clock-time sort across midnight inverts safe and earlier: a 00:05 finish sorts before a 23:55 finish.</td>
-          <td><span class="chip advice">wrong time</span></td>
-          <td>Sort by full datetime, then compare clock times only for display.</td></tr>
+          <td><span class="chip advice">wrong time</span> <span class="chip fixed">addressed in 0.7.0</span></td>
+          <td>Addressed. The clock time is kept as the time of day, and the <code>(+1 day)</code> marker records a buffer that crosses midnight.</td></tr>
         <tr data-t="advice crash"><td><strong>B4</strong></td>
-          <td><code>buffer_min</code> is never validated. <code>--buffer -30</code> shifts the safe time earlier than anything observed. <code>--days 0</code> crashes the CLI with a raw traceback.</td>
+          <td><code>buffer_min</code> is never validated. <code>--buffer -30</code> shifts the safe time earlier than anything observed. <code>days_history</code> is validated at construction, and the CLI reports the error without a raw traceback.</td>
           <td><span class="chip advice">wrong time</span> <span class="chip crash">crash</span></td>
-          <td>Validate both settings at construction time, inside the CLI error handling.</td></tr>
+          <td>Validate <code>buffer_min</code> at construction time.</td></tr>
         <tr data-t="block"><td><strong>C1</strong></td>
           <td>Shallow clones (<code>MANAGED_SHALLOW_CLONE</code>, <code>EXTERNAL_SHALLOW_CLONE</code>) are real Delta tables with history, but they are not in the gating set. A view on a fresh clone blocks.</td>
           <td><span class="chip block">false BLOCK</span></td>
@@ -772,9 +774,9 @@ To unblock, refresh:
           <td><span class="chip crash">crash</span></td>
           <td>Skip a malformed row, or fail the table with a specific reason.</td></tr>
         <tr data-t="test"><td><strong>E1</strong></td>
-          <td>The real <code>Workspace.sql</code> seam has zero offline tests. Pagination, chunks, the truncation guard, the manifest, the timeout — the code where C3 and D2 live — never runs in the suite.</td>
-          <td><span class="chip test">tests</span></td>
-          <td>Add offline tests with a fake SDK transport for the seam.</td></tr>
+          <td>At the time of the audit, the real <code>Workspace.sql</code> seam had zero offline tests. Pagination, chunks, the truncation guard, the manifest, the timeout — the code where C3 and D2 live — never ran in the suite.</td>
+          <td><span class="chip test">tests</span> <span class="chip fixed">partly fixed in 0.7.0</span></td>
+          <td>Chunk following and retry states are now covered offline. A direct test for the truncation guard and the 50s timeout is still missing.</td></tr>
         <tr data-t="test"><td><strong>E2</strong></td>
           <td>The fake <code>Workspace</code> in tests routes SQL by the substring <code>event_log</code>. A table named like that is misrouted in tests.</td>
           <td><span class="chip test">tests</span></td>
@@ -788,7 +790,7 @@ To unblock, refresh:
     2 · A2 and A4 (MV and streaming event signals) ·
     3 · C1 and C2 (needless blocks) ·
     4 · C3 (read limits) ·
-    5 · E1 (test the seam).</p>
+    5 · D1 and D2 (the broken classify tool and a malformed history row).</p>
   </div>
 </section>
 
@@ -823,7 +825,7 @@ To unblock, refresh:
         <li><code>run.py</code> — the collector and <code>analyze()</code>.</li>
         <li><code>recommend.py</code> — safe and earlier times. Pure math.</li>
         <li><code>advice.py</code> / <code>report.py</code> — the advisory result and its text.</li>
-        <li><code>tests/</code> — 270 offline tests, a fake Workspace, pinned clock.</li>
+        <li><code>tests/</code> — 283 offline tests, a fake Workspace, pinned clock.</li>
         <li><code>rig/</code> — the 61-day live fixture that writes real history.</li>
       </ul>
     </div>
@@ -836,7 +838,7 @@ To unblock, refresh:
 </section>
 
 <footer>
-  view-scheduler 0.7.0 · generated 2026-10-16 · read-only by design ·
+  view-scheduler 0.7.0 · checked 2026-10-21 · read-only by design ·
   sources: README.md, HANDOFF.md, src/view_scheduler, live workspace.sched_rig probe ·
   this page is self-contained; open it in any browser.
 </footer>

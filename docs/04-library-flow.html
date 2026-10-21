@@ -72,6 +72,7 @@ h3 { font-size: 1.05rem; margin: 26px 0 7px; }
 .diagram { display: block; min-width: 950px; width: 100%; height: auto; }
 .caption { color: var(--muted); font-family: "Courier New", monospace; font-size: 12px; margin: 10px 0 0; }
 code { background: color-mix(in srgb, var(--rule) 45%, transparent); padding: 1px 5px; font-size: .86em; }
+pre { background: var(--surface); border: 1px solid var(--rule); padding: 14px 16px; overflow-x: auto; font-family: "Courier New", monospace; font-size: 12.5px; line-height: 1.55; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .card { border: 1px solid var(--rule); background: var(--surface); padding: 16px; }
 .card h3 { margin-top: 0; }
@@ -96,10 +97,19 @@ li { margin-bottom: 6px; }
 <body>
 <main class="wrap">
   <header>
-    <p class="eyebrow">Visual implementation guide</p>
+    <p class="eyebrow">Design record</p>
     <h1>From view name to schedule time</h1>
-    <p class="lead">This is the complete flow of the proposed library. Read it from top to bottom. Blue boxes do I/O, gray boxes do pure computation, and red branches become visible warnings instead of disappearing.</p>
+    <p class="lead">This page records the original design of the library, with the shipped rules
+    marked. The current, verified flow is <a href="08-stage-chart.html">08 · One spine, two answers</a>.
+    Blue boxes do I/O, gray boxes do pure computation, and red branches become visible warnings
+    instead of disappearing.</p>
   </header>
+
+  <div class="note">
+    <span class="label">Superseded</span>
+    <p>Read this as history, not as the current flow. Since this design the library gained a runtime
+    gate, a Spark read path, gated streaming tables, and a rule that a zero-row write counts.</p>
+  </div>
 
   <div class="note">
     <span class="label">Important boundary</span>
@@ -136,6 +146,18 @@ li { margin-bottom: 6px; }
           .blue-line { fill: none; stroke: #1e6f8c; stroke-width: 2; marker-end: url(#blue-arrow); }
           .dashed { fill: none; stroke: #a87a16; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
           .side { font: 13px "Courier New", monospace; fill: #697a88; }
+          @media (prefers-color-scheme: dark) {
+            .box { fill: #151e24; stroke: #7e8f9b; }
+            .io { fill: #12303c; stroke: #59aec9; }
+            .good { fill: #12301f; stroke: #6fbe95; }
+            .warn { fill: #33280f; stroke: #d6a94a; }
+            .bad { fill: #3a1a22; stroke: #e2788b; }
+            .decision { fill: #151e24; stroke: #7e8f9b; }
+            .title, .body, .white-body { fill: #dce5ea; }
+            .small, .side { fill: #a9b9c4; }
+            .line, .dashed { stroke: #7e8f9b; }
+            .blue-line { stroke: #59aec9; }
+          }
         </style>
 
         <!-- Main path -->
@@ -146,14 +168,14 @@ li { margin-bottom: 6px; }
 
         <path class="blue-line" d="M560 108 L560 146" />
         <rect class="box" x="280" y="146" width="560" height="86" rx="5" />
-        <text class="title" x="560" y="181" text-anchor="middle">analyze(...)</text>
-        <text class="body" x="560" y="206" text-anchor="middle">orchestrates the run; injects fetch_meta and fetch_history</text>
-        <text class="small" x="560" y="224" text-anchor="middle">no Spark or network inside the pure functions</text>
+        <text class="title" x="560" y="181" text-anchor="middle">collect_history(...)</text>
+        <text class="body" x="560" y="206" text-anchor="middle">walk, read, and classify; the advisor's shared pipeline</text>
+        <text class="small" x="560" y="224" text-anchor="middle">analyze() adds the report text</text>
 
         <path class="line" d="M560 232 L560 274" />
         <rect class="io" x="300" y="274" width="520" height="88" rx="5" />
         <text class="title" x="560" y="309" text-anchor="middle">walk(view_fqn, fetch_meta)</text>
-        <text class="body" x="560" y="334" text-anchor="middle">GET UC table metadata, then recurse through VIEW dependencies</text>
+        <text class="body" x="560" y="334" text-anchor="middle">GET UC metadata; recurse through VIEW dependencies</text>
         <text class="small" x="560" y="352" text-anchor="middle">memo + active set + depth cap 60</text>
 
         <path class="line" d="M560 362 L560 402" />
@@ -169,35 +191,29 @@ li { margin-bottom: 6px; }
         <path class="blue-line" d="M190 548 C190 400 280 316 300 316" />
 
         <path class="line" d="M560 522 L560 548" />
-        <text class="side" x="610" y="538">MANAGED / EXTERNAL / MV</text>
+        <text class="side" x="610" y="538">MANAGED / EXTERNAL / MV / STREAMING</text>
         <rect class="box" x="410" y="548" width="300" height="106" rx="5" />
         <text class="title" x="560" y="582" text-anchor="middle">terminal gating table</text>
         <text class="body" x="560" y="608" text-anchor="middle">add to batch table list</text>
         <text class="small" x="560" y="632" text-anchor="middle">history will be read later</text>
 
         <path class="line" d="M720 462 L930 462 L930 548" />
-        <text class="side" x="830" y="451" text-anchor="middle">FOREIGN / HMS / function / error</text>
+        <text class="side" x="830" y="451" text-anchor="middle">FOREIGN / HMS / error</text>
         <rect class="bad" x="784" y="548" width="292" height="106" rx="5" />
-        <text class="title" x="930" y="582" text-anchor="middle">skipped list</text>
-        <text class="body" x="930" y="608" text-anchor="middle">name + reason</text>
-        <text class="small" x="930" y="632" text-anchor="middle">never silently dropped</text>
+        <text class="title" x="930" y="582" text-anchor="middle">blocker or note</text>
+        <text class="body" x="930" y="608" text-anchor="middle">unreadable becomes a blocker</text>
+        <text class="small" x="930" y="632" text-anchor="middle">function dependency -> note</text>
 
         <rect class="warn" x="44" y="688" width="292" height="96" rx="5" />
         <text class="title" x="190" y="722" text-anchor="middle">cycle / depth guard</text>
-        <text class="body" x="190" y="748" text-anchor="middle">append skipped reason</text>
+        <text class="body" x="190" y="748" text-anchor="middle">append blocked reason</text>
         <text class="small" x="190" y="768" text-anchor="middle">walk continues</text>
         <path class="dashed" d="M44 600 L24 600 L24 736 L44 736" />
 
-        <rect class="warn" x="784" y="688" width="292" height="96" rx="5" />
-        <text class="title" x="930" y="722" text-anchor="middle">STREAMING_TABLE</text>
-        <text class="body" x="930" y="748" text-anchor="middle">separate continuous list</text>
-        <text class="small" x="930" y="768" text-anchor="middle">do not use first commit of day</text>
-        <path class="dashed" d="M710 600 L760 600 L760 736 L784 736" />
-
         <path class="line" d="M560 654 L560 830" />
         <rect class="io" x="300" y="830" width="520" height="92" rx="5" />
-        <text class="title" x="560" y="865" text-anchor="middle">fetch_history(table)</text>
-        <text class="body" x="560" y="890" text-anchor="middle">DESCRIBE HISTORY once per terminal table</text>
+        <text class="title" x="560" y="865" text-anchor="middle">read_commits(table)</text>
+        <text class="body" x="560" y="890" text-anchor="middle">DESCRIBE HISTORY, or the MV event log</text>
         <text class="small" x="560" y="910" text-anchor="middle">per-table errors become skipped entries</text>
 
         <path class="line" d="M560 922 L560 962" />
@@ -218,14 +234,14 @@ li { margin-bottom: 6px; }
         <rect class="good" x="424" y="1088" width="272" height="110" rx="5" />
         <text class="title" x="560" y="1122" text-anchor="middle">qualifying finish</text>
         <text class="body" x="560" y="1148" text-anchor="middle">Append / MERGE / UPDATE</text>
-        <text class="small" x="560" y="1174" text-anchor="middle">rows &gt; 0, or empty metrics</text>
+        <text class="small" x="560" y="1174" text-anchor="middle">any write counts, 0 rows too</text>
 
         <path class="line" d="M820 1011 L940 1011 L940 1088" />
-        <text class="side" x="880" y="1000" text-anchor="middle">ignore / ran-empty</text>
+        <text class="side" x="880" y="1000" text-anchor="middle">maintenance / unknown</text>
         <rect class="warn" x="804" y="1088" width="272" height="110" rx="5" />
         <text class="title" x="940" y="1122" text-anchor="middle">status flags</text>
-        <text class="body" x="940" y="1148" text-anchor="middle">OPTIMIZE / DELETE / 0 rows</text>
-        <text class="small" x="940" y="1174" text-anchor="middle">keep warning; do not invent finish</text>
+        <text class="body" x="940" y="1148" text-anchor="middle">OPTIMIZE / VACUUM / DELETE</text>
+        <text class="small" x="940" y="1174" text-anchor="middle">never a refresh; named in the report</text>
 
         <path class="line" d="M560 1198 L560 1240" />
         <rect class="box" x="300" y="1240" width="520" height="100" rx="5" />
@@ -236,22 +252,22 @@ li { margin-bottom: 6px; }
         <path class="line" d="M560 1340 L560 1380" />
         <rect class="box" x="270" y="1380" width="580" height="118" rx="5" />
         <text class="title" x="560" y="1415" text-anchor="middle">recommend(...)</text>
-        <text class="body" x="560" y="1440" text-anchor="middle">evaluate each date in the requested window</text>
-        <text class="small" x="560" y="1464" text-anchor="middle">today finish -> use time; earlier refresh -> stale-ready=0</text>
-        <text class="small" x="560" y="1483" text-anchor="middle">never refreshed -> blocked day; all-clear=max table times</text>
+        <text class="body" x="560" y="1440" text-anchor="middle">intersect the days every dependency wrote</text>
+        <text class="small" x="560" y="1464" text-anchor="middle">all-clear = every table wrote that day</text>
+        <text class="small" x="560" y="1483" text-anchor="middle">safe = latest all-clear clock time + buffer</text>
 
         <path class="line" d="M560 1498 L560 1538" />
         <rect class="good" x="270" y="1538" width="580" height="104" rx="5" />
         <text class="title" x="560" y="1573" text-anchor="middle">schedule results</text>
-        <text class="body" x="560" y="1598" text-anchor="middle">safe = worst all-clear + buffer</text>
-        <text class="body" x="560" y="1620" text-anchor="middle">sooner = the typical day (the median) + buffer; per-weekday times</text>
+        <text class="body" x="560" y="1598" text-anchor="middle">safe = latest normal all-clear + buffer</text>
+        <text class="body" x="560" y="1620" text-anchor="middle">earlier = median normal day + buffer</text>
 
         <path class="line" d="M560 1642 L560 1682" />
         <rect class="good" x="270" y="1682" width="580" height="40" rx="5" />
         <text class="title" x="560" y="1708" text-anchor="middle">render(report) -> human-readable output</text>
       </svg>
     </div>
-    <p class="caption">The main path is vertical. Side branches are not failures of the whole run: they become named evidence or warnings in the final report.</p>
+    <p class="caption">The main path is vertical. Side branches are not failures of the whole run: they become named evidence or warnings in the final report. A streaming table is a gating table and is read like any other table.</p>
   </section>
 
   <section>
@@ -262,13 +278,13 @@ li { margin-bottom: 6px; }
           <tr><th>Function</th><th>Input</th><th>Output</th><th>Purpose</th></tr>
         </thead>
         <tbody>
-          <tr><td class="function">analyze</td><td>view name, config, injected I/O</td><td>report data</td><td>Runs the pipeline in order.</td></tr>
-          <tr><td class="function">walk</td><td>FQN + <code>fetch_meta</code></td><td>gating tables + skipped list</td><td>Finds terminal dependencies without parsing SQL.</td></tr>
-          <tr><td class="function">fetch_history</td><td>table FQN</td><td>raw history rows</td><td>Reads Delta history; never writes data.</td></tr>
-          <tr><td class="function">classify</td><td>one history row</td><td>status + flags</td><td>Decides whether the row represents a usable refresh.</td></tr>
-          <tr><td class="function">finish_times</td><td>history rows + timezone</td><td><code>{date: minute}</code></td><td>Chooses the first qualifying finish each local day.</td></tr>
-          <tr><td class="function">recommend</td><td>per-table finish maps</td><td>safe, sooner, weekday times</td><td>Combines dependencies and exposes risk.</td></tr>
-          <tr><td class="function">render</td><td>report data</td><td>text/HTML report</td><td>Shows the answer, evidence, and only applicable warnings.</td></tr>
+          <tr><td class="function">analyze</td><td>view name, Workspace, Config</td><td>report text, histories, skips</td><td>Runs the pipeline in order.</td></tr>
+          <tr><td class="function">walk</td><td>FQN + <code>fetch_meta</code></td><td>gating tables, blockers, notes</td><td>Finds terminal dependencies without parsing SQL.</td></tr>
+          <tr><td class="function">read_commits</td><td>table FQN</td><td>raw commits</td><td>Reads Delta history or the MV event log; never writes data.</td></tr>
+          <tr><td class="function">classify</td><td>one commit</td><td>full_replace / incremental / ignore / unknown</td><td>Decides whether the row represents a usable refresh.</td></tr>
+          <tr><td class="function">finish_times</td><td>commits + timezone</td><td><code>{date: datetime}</code></td><td>Chooses the first qualifying commit each local day.</td></tr>
+          <tr><td class="function">recommend</td><td>per-table finish maps</td><td>safe, earlier, outlier days</td><td>Combines dependencies and exposes risk.</td></tr>
+          <tr><td class="function">render</td><td>report data</td><td>text</td><td>Shows the answer, evidence, and only applicable warnings.</td></tr>
         </tbody>
       </table>
     </div>
@@ -286,8 +302,8 @@ li { margin-bottom: 6px; }
         <p><code>WRITE</code> is not enough. The code checks <code>operationParameters.mode</code>. Full replacements qualify even when they write zero rows.</p>
       </article>
       <article class="card warn">
-        <h3>No runtime gate</h3>
-        <p>The library never waits. A missed refresh becomes evidence, while <code>safe</code> and <code>sooner</code> show the cost of choosing an earlier time.</p>
+        <h3>The runtime gate</h3>
+        <p><code>can_refresh</code> checks every dependency's latest write before the refresh runs, and fails closed. The advisor never waits: it suggests a time from history, while <code>safe</code> and <code>earlier</code> show the cost of choosing an earlier time.</p>
       </article>
     </div>
   </section>
@@ -298,7 +314,7 @@ li { margin-bottom: 6px; }
       <p>A table normally finishes at 07:00 but finishes at 08:00 once:</p>
       <ul>
         <li><strong>safe:</strong> 08:15, because it covers the observed worst day;</li>
-        <li><strong>sooner:</strong> approximately 07:15, because it is the typical day, not the observed worst day;</li>
+        <li><strong>earlier:</strong> approximately 07:15, because it is the median normal day, not the observed worst day;</li>
         <li><strong>evidence:</strong> the report names the date, table, usual time, worst time, and the one-day risk.</li>
       </ul>
       <p>The library does not silently delete the 08:00 incident. It lets the operator decide whether that incident should permanently influence the schedule.</p>
@@ -308,6 +324,20 @@ li { margin-bottom: 6px; }
   <section>
     <h2>5. Final report shape</h2>
     <pre><code>VIEW   sales_gold.customer_360
+       2 dependencies · last 30 days · times Asia/Kolkata
+
+       SCHEDULE AT  06:25    safe on 29 of 30 days — excludes 1 outlier day
+       WITH OUTLIERS  08:10  safe on all 30 days
+       EARLIER      04:25    one job had not finished yet, on 1 of 30 days
+
+DEPENDENCY                  RUNS    USUAL   LATEST  DAYS  MISSED
+sales_gold.dim_customer     daily   06:10   08:10   30    0
+sales_gold.fact_orders      daily   04:10   04:25   30    0
+
+WHEN THE LAST JOB FINISHED, DAY BY DAY   (latest first)
+  2026-10-20  Tue  06:25   ← sets the SCHEDULE AT time
+  2026-10-19  Mon  08:10   ← sets the WITH OUTLIERS time
+  2026-10-18  Sun  06:20</code></pre>
   </section>
 </main>
 </body>
