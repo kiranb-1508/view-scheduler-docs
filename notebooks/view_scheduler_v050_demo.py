@@ -1,8 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # View Materialization Scheduler `v0.6.0` — New Features Demo
+# MAGIC # View Materialization Scheduler `v0.7.0` — feature demo
 # MAGIC
-# MAGIC This notebook showcases and verifies the changes in `view_scheduler 0.6.0`:
+# MAGIC This notebook showcases and verifies the features added through `0.6.0`,
+# MAGIC running against the `0.7.0` wheel:
 # MAGIC
 # MAGIC 1. **Spark compute fallback (`v0.5.1` + `v0.6.0`):** `can_refresh("c.s.v")` and `advise("c.s.v")` run directly on the active `SparkSession` when no `WAREHOUSE_ID` is passed.
 # MAGIC 2. **Dynamic SQL history window (`since_epoch`):** `DESCRIBE HISTORY` and `event_log()` queries filter by the configured `days_history` window in SQL.
@@ -12,7 +13,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.7.0-py3-none-any.whl
 
 # COMMAND ----------
 
@@ -204,7 +205,7 @@ summary["gate_multi_daily"] = gate_multi.to_dict()
 
 # COMMAND ----------
 
-print("===== v0.6.0 DEMO SUMMARY =====")
+print("===== FEATURE DEMO SUMMARY =====")
 print(json.dumps({
     "live_late_tail_safe": summary["live_late_tail"]["safe_time"],
     "live_late_tail_without_outliers": summary["live_late_tail"]["safe_without_outliers"],
