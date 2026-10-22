@@ -19,7 +19,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.7.0-py3-none-any.whl
 
 # COMMAND ----------
 

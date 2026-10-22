@@ -14,15 +14,11 @@
 # MAGIC > starts anyway and publishes stale data, silently. Treat the output as
 # MAGIC > evidence for a decision, not a guarantee. For a live check, use the gate.
 # MAGIC
-# MAGIC > **The fixture rig is on day 1 of 30.** Every table below currently has one
-# MAGIC > or two days of history, and the largest timestamp in the window is the
-# MAGIC > *setup* commit from the day the rig was created (~16:43 IST), not a
-# MAGIC > scheduled run. So most views here report `SCHEDULE AT 16:58` — pinned by setup,
-# MAGIC > not by the pipeline. That is a real property of the current data, not a
-# MAGIC > bug, and it is worth seeing: it shows exactly how a single unrepresentative
-# MAGIC > commit drags the recommendation, and why the `DAYS` column and the
-# MAGIC > `WHEN THE LAST JOB FINISHED` block matter more than the headline time when
-# MAGIC > evidence is thin. Re-run this in a week for a realistic picture.
+# MAGIC > **The fixture rig has been writing since 2026-09-01.** It runs to
+# MAGIC > 2026-10-31, so the window now holds weeks of scheduled runs and the
+# MAGIC > headline times come from real slots, not from the setup commit. The
+# MAGIC > `DAYS` column and the `WHEN THE LAST JOB FINISHED` block show the
+# MAGIC > evidence behind each time.
 
 # COMMAND ----------
 
@@ -34,7 +30,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
+# MAGIC %pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.7.0-py3-none-any.whl
 
 # COMMAND ----------
 
@@ -125,10 +121,10 @@ print(text)
 # MAGIC `t_maintenance_only` (a real write every third day, metadata-only commits
 # MAGIC otherwise).
 # MAGIC
-# MAGIC On day 30 `t_dormant` will stand out as a table that refreshed once in
-# MAGIC thirty days. **Today it does not**, because that one setup commit is the
-# MAGIC entire window — so it reports `Mons` with `DAYS 1` and `MISSED 0`, and the
-# MAGIC view gets a confident-looking `safe`. Watch what actually gives it away.
+# MAGIC `t_dormant` was written once at setup, on 2026-09-01, and never again.
+# MAGIC That commit is now outside the 30-day window, so the table reads `never`
+# MAGIC with `DAYS 0`, and `v_broken` has no day where every dependency wrote.
+# MAGIC The report declines to suggest a time.
 
 # COMMAND ----------
 
@@ -143,15 +139,14 @@ print(text)
 # MAGIC `MISSED 0` is technically true and completely misleading — a table cannot
 # MAGIC miss days it was never expected to run. The signals that matter:
 # MAGIC
-# MAGIC * **`DAYS 1`** — one day of evidence behind that time.
-# MAGIC * **`runs only on Mons`** — the pattern was inferred from a single
-# MAGIC   observation that happened to fall on a Monday.
-# MAGIC * **the weak-advice warning**, which names the dependency with the fewest days.
-# MAGIC * **`WHEN THE LAST JOB FINISHED`**, showing the single day the time rests on.
+# MAGIC * **`DAYS 0`** — no evidence at all, so no time to suggest.
+# MAGIC * **`runs never`** — the table did not write inside the window.
+# MAGIC * **the warning line**, which names the table and says it may be stopped.
+# MAGIC * **`MISSED` read next to `DAYS`** — never trust one without the other.
 # MAGIC
 # MAGIC Read `MISSED` next to `DAYS` or you will read it wrong. This is the honest
-# MAGIC failure mode of a 30-day statistic computed on day 1, and the report's job is
-# MAGIC to make it visible rather than hide it behind a plausible time.
+# MAGIC failure mode of a fixed window: a table with no write inside it is reported
+# MAGIC as never seen, and the report refuses to invent a time.
 
 # COMMAND ----------
 
@@ -159,9 +154,9 @@ print(text)
 # MAGIC ### What an outright refusal looks like
 # MAGIC
 # MAGIC When no single day has *every* dependency refreshing, there is no honest
-# MAGIC answer and the tool declines to invent one. The rig cannot show this today,
-# MAGIC so here it is against the pure API — which needs no warehouse at all, and is
-# MAGIC how you would unit-test against this library.
+# MAGIC answer and the tool declines to invent one. `v_broken` above already shows
+# MAGIC this shape. Here it is again against the pure API — which needs no
+# MAGIC warehouse at all, and is how you would unit-test against this library.
 
 # COMMAND ----------
 
@@ -197,9 +192,9 @@ print(render("gold.no_overlap", recommend([monday_only, friday_only], 15), [], "
 # MAGIC 00:20 IST and `t_late_evening` at 23:40. In UTC those land on *different
 # MAGIC calendar days*, which is the bug that pinning the timezone prevents.
 # MAGIC
-# MAGIC Once a few days of slot writes accumulate you will see those two times sit
-# MAGIC either side of the boundary. Today the window is still dominated by the
-# MAGIC setup commit, so the effect is not visible yet — run this again in a week.
+# MAGIC Weeks of slot writes now sit in the window, so `t_near_midnight` and
+# MAGIC `t_late_evening` appear on either side of the boundary, each on its own
+# MAGIC local day.
 
 # COMMAND ----------
 
@@ -356,7 +351,7 @@ print(text)
 # MAGIC The same thing without a notebook:
 # MAGIC
 # MAGIC ```bash
-# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.6.0-py3-none-any.whl
+# MAGIC pip install /Volumes/workspace/sched_rig/libs/view_scheduler-0.7.0-py3-none-any.whl
 # MAGIC export WAREHOUSE_ID=f96bd3430e175166
 # MAGIC view-scheduler workspace.sched_rig.v_realistic
 # MAGIC view-scheduler workspace.sched_rig.v_healthy --days 60 --buffer 30 --quiet
